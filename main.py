@@ -3,7 +3,6 @@ import requests
 import os
 import threading
 import sys
-import random
 from flask import Flask
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
@@ -37,142 +36,125 @@ def send_telegram(message):
                           data={"chat_id": CHAT_ID, "text": message})
         except: pass
 
-# --- BROWSER SETUP (DESKTOP MODE) ---
+# --- BROWSER SETUP (MOBILE MODE) ---
 def setup_driver():
-    print("   -> Launching Desktop Chrome...", flush=True)
+    print("   -> Launching Mobile Chrome...", flush=True)
     opts = Options()
     opts.add_argument("--headless") 
     opts.add_argument("--no-sandbox")
     opts.add_argument("--disable-dev-shm-usage")
     
-    # CRITICAL: Use Desktop Size to separate Chat Widget from Login Button
-    opts.add_argument("--window-size=1920,1080")
-    
-    # Desktop User Agent
-    opts.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36")
+    # Back to Mobile View (Matches your screenshot)
+    opts.add_argument("--window-size=375,812")
+    opts.add_argument("user-agent=Mozilla/5.0 (Linux; Android 10; SM-A205U) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/99.0.4844.88 Mobile Safari/537.36")
     
     opts.set_capability('goog:loggingPrefs', {'browser': 'ALL'})
-    
     if os.environ.get("CHROME_BIN"): opts.binary_location = os.environ.get("CHROME_BIN")
     
     driver = webdriver.Chrome(options=opts)
     driver.set_page_load_timeout(60)
     return driver
 
-# --- THE NUCLEAR CLEANER ---
-def nuke_overlays(driver):
-    """Deletes Chat Widgets, Cookies, and Banners to clear the click path"""
-    print("   -> ☢️ NUKING OVERLAYS...", flush=True)
-    driver.execute_script("""
-        // Remove Tawk.to and other chat widgets
-        var iframes = document.querySelectorAll('iframe');
-        iframes.forEach(f => f.remove());
-        
-        // Remove cookie banners
-        var banners = document.querySelectorAll('div[class*="cookie"], div[class*="modal"], div[class*="popup"]');
-        banners.forEach(b => b.remove());
-        
-        // Remove Z-Index blockers
-        var blockers = document.querySelectorAll('div[style*="z-index: 999"]');
-        blockers.forEach(b => b.remove());
-    """)
-    time.sleep(1)
-
-# --- HARDWARE LEVEL TYPING ---
-def smart_type(driver, element, text):
-    """Uses ActionChains to simulate real hardware keyboard events"""
-    driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", element)
-    time.sleep(0.5)
-    element.click()
-    element.clear()
+# --- HELPER: BRUTE FORCE CLICKER ---
+def find_and_click_login_button(driver):
+    print("   -> 🕵️ BRUTE FORCE SEARCH: Looking for ANY login button...", flush=True)
     
-    actions = ActionChains(driver)
-    actions.click(element)
-    for char in text:
-        actions.send_keys(char)
-        actions.pause(0.1)
-    actions.perform()
+    # Get ALL clickable elements
+    elements = driver.find_elements(By.XPATH, "//button | //a | //div[@role='button'] | //input[@type='submit']")
     
-    time.sleep(0.5)
-    # Trigger events manually to be safe
-    driver.execute_script("arguments[0].dispatchEvent(new Event('input', { bubbles: true }));", element)
-    driver.execute_script("arguments[0].dispatchEvent(new Event('change', { bubbles: true }));", element)
+    clicked = False
+    for el in elements:
+        try:
+            # Get text and clean it
+            txt = el.text.strip().lower()
+            val = el.get_attribute("value")
+            if val: txt += " " + val.lower()
+            
+            # Check if it looks like a login button
+            if "login" in txt or "sign in" in txt or "log in" in txt:
+                # Ignore the 'Register' button or Header links if possible, try to prioritize submit
+                print(f"      -> Found candidate: '{el.text}' (Tag: {el.tag_name})", flush=True)
+                
+                driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", el)
+                time.sleep(0.5)
+                
+                # Attempt Click
+                try:
+                    el.click()
+                except:
+                    driver.execute_script("arguments[0].click();", el)
+                
+                print("      -> CLICKED!", flush=True)
+                clicked = True
+                break # Stop after clicking the first valid one
+        except:
+            continue
+            
+    if not clicked:
+        print("      -> ❌ No button text matched. Trying generic Submit...", flush=True)
+        try:
+            btn = driver.find_element(By.XPATH, "//button[@type='submit']")
+            driver.execute_script("arguments[0].click();", btn)
+            print("      -> Clicked type='submit'", flush=True)
+            clicked = True
+        except: pass
+        
+    return clicked
 
 # --- LOGIN LOGIC ---
 def perform_login(driver):
-    print("🔑 Detect Login Page. Starting DESKTOP Login...", flush=True)
+    print("🔑 Detect Login Page. Starting BRUTE FORCE Login...", flush=True)
     
     try:
         wait = WebDriverWait(driver, 20)
-        time.sleep(5)
+        time.sleep(3)
         
-        # 1. Clean the page
-        nuke_overlays(driver)
+        # 1. Clean Overlays
+        driver.execute_script("document.querySelectorAll('iframe').forEach(e => e.remove());")
         
-        # 2. Find Inputs
+        # 2. Inputs
         wait.until(EC.presence_of_element_located((By.TAG_NAME, "input")))
         inputs = driver.find_elements(By.TAG_NAME, "input")
         visible = [i for i in inputs if i.is_displayed()]
         
         if len(visible) < 2:
-            print("❌ Input Error: Not enough boxes.", flush=True)
+            print("❌ Input Error.", flush=True)
             return False
             
         phone_in = visible[0]
         pass_in = visible[1]
         
-        # 3. Type Credentials
+        # 3. Type Credentials (HARDWARE MODE)
         print("   -> Typing Credentials...", flush=True)
-        smart_type(driver, phone_in, LOGIN_PHONE)
-        time.sleep(1)
-        smart_type(driver, pass_in, LOGIN_PASSWORD)
+        actions = ActionChains(driver)
+        
+        # Phone
+        phone_in.click()
+        phone_in.clear()
+        actions.click(phone_in).send_keys(LOGIN_PHONE).perform()
+        time.sleep(0.5)
+        
+        # Password
+        pass_in.click()
+        pass_in.clear()
+        actions.click(pass_in).send_keys(LOGIN_PASSWORD).perform()
         time.sleep(1)
         
-        # 4. Clean page again (Chat widget might have respawned)
-        nuke_overlays(driver)
-
-        # 5. FIND BUTTON (Priority: Submit Type)
-        print("   -> Targeting Button...", flush=True)
-        btn = None
-        try:
-            # Look for submit type (Yellow button)
-            btn = driver.find_element(By.XPATH, "//button[@type='submit']")
-            print("      (Found Submit Button)", flush=True)
-        except:
-            try:
-                # Look for Text
-                btn = driver.find_element(By.XPATH, "//button[contains(text(), 'LOGIN')]")
-                print("      (Found Text Button)", flush=True)
-            except: pass
-            
-        # 6. CLICK
-        if btn:
-            # Force enable
-            driver.execute_script("arguments[0].removeAttribute('disabled');", btn)
-            try:
-                # Try standard click first
-                btn.click()
-                print("      -> Standard Click used.", flush=True)
-            except:
-                # Fallback to JS click
-                driver.execute_script("arguments[0].click();", btn)
-                print("      -> JS Click used.", flush=True)
-        else:
-            print("   -> Button missing. Pressing Enter...", flush=True)
+        # 4. CLICK THE BUTTON
+        if not find_and_click_login_button(driver):
+            print("   -> ⚠️ Could not click button. Pressing ENTER...", flush=True)
             pass_in.send_keys(Keys.RETURN)
 
-        # 7. Verify
+        # 5. Verify
         print("   -> Waiting for redirect...", flush=True)
         time.sleep(15)
         
         if "auth" in driver.current_url or "Sign" in driver.title:
-            print("❌ Login Failed. Dumping HTML body...", flush=True)
+            print("❌ Login Failed. Page didn't change.", flush=True)
             body = driver.find_element(By.TAG_NAME, "body").text
             if "Invalid" in body:
-                print("   -> ERROR: Invalid Username/Password", flush=True)
+                print("   -> ERROR: Invalid Credentials", flush=True)
                 send_telegram("❌ Login Failed: Invalid Credentials")
-            else:
-                print(f"   -> PAGE TEXT SAMPLE: {body[:100]}", flush=True)
             return False
             
         print("✅ Login Successful!", flush=True)
