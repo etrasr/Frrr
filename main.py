@@ -36,19 +36,19 @@ def send_telegram(message):
                           data={"chat_id": CHAT_ID, "text": message})
         except: pass
 
-# --- BROWSER SETUP (MOBILE STEALTH) ---
+# --- BROWSER SETUP ---
 def setup_driver():
-    print("   -> Launching Chrome (Mobile Stealth)...", flush=True)
+    print("   -> Launching Chrome...", flush=True)
     opts = Options()
     opts.add_argument("--headless") 
     opts.add_argument("--no-sandbox")
     opts.add_argument("--disable-dev-shm-usage")
     
-    # MOBILE EMULATION (Nexus 5X) - Essential for correct layout
+    # MOBILE EMULATION (Nexus 5X)
     mobile_emulation = { "deviceName": "Nexus 5X" }
     opts.add_experimental_option("mobileEmulation", mobile_emulation)
     
-    # STEALTH FLAGS
+    # STEALTH
     opts.add_argument("--disable-blink-features=AutomationControlled")
     opts.add_experimental_option("excludeSwitches", ["enable-automation"])
     opts.add_experimental_option("useAutomationExtension", False)
@@ -59,40 +59,31 @@ def setup_driver():
     driver.set_page_load_timeout(60)
     return driver
 
-# --- CRITICAL: REACT TYPING ---
+# --- HELPER: ROBUST TYPE ---
 def robust_type(driver, element, text):
-    """Types and forces the website to acknowledge the input"""
     driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", element)
     time.sleep(0.5)
-    try:
-        element.click()
-        element.clear()
+    try: element.click(); element.clear()
     except: pass
-    
-    # Type slowly
     for char in text:
         element.send_keys(char)
         time.sleep(0.05)
-    
-    # FORCE EVENTS (The Key Fix)
+    # Force Value Update
     driver.execute_script("""
-        let ev1 = new Event('input', { bubbles: true });
-        let ev2 = new Event('change', { bubbles: true });
-        let ev3 = new Event('blur', { bubbles: true });
-        arguments[0].dispatchEvent(ev1);
-        arguments[0].dispatchEvent(ev2);
-        arguments[0].dispatchEvent(ev3);
+        arguments[0].dispatchEvent(new Event('input', { bubbles: true }));
+        arguments[0].dispatchEvent(new Event('change', { bubbles: true }));
+        arguments[0].dispatchEvent(new Event('blur', { bubbles: true }));
     """, element)
     time.sleep(0.5)
 
 # --- LOGIN ---
 def perform_login(driver):
-    print("🔑 Detect Login Page. Starting FINAL ROBUST Login...", flush=True)
+    print("🔑 Detect Login Page. Starting SURGEON Login...", flush=True)
     
     try:
         wait = WebDriverWait(driver, 20)
         
-        # 1. Find Inputs
+        # 1. Inputs
         wait.until(EC.presence_of_element_located((By.TAG_NAME, "input")))
         inputs = driver.find_elements(By.TAG_NAME, "input")
         visible = [i for i in inputs if i.is_displayed()]
@@ -109,41 +100,64 @@ def perform_login(driver):
         robust_type(driver, phone_in, LOGIN_PHONE)
         robust_type(driver, pass_in, LOGIN_PASSWORD)
         
-        # 3. INTERACT WITH CHECKBOX (Wake up form)
+        # 3. INTERACT WITH CHECKBOX
         try:
             checkbox = driver.find_element(By.XPATH, "//input[@type='checkbox']")
             driver.execute_script("arguments[0].click();", checkbox)
         except: pass
 
-        # 4. FIND BUTTON (Using XPath Neighbor Strategy)
-        print("   -> Finding Button...", flush=True)
-        target_btn = None
+        # 4. THE SURGEON SCRIPT (Javascript Search)
+        print("   -> Running JS Smart Search...", flush=True)
         
-        # Strategy: Find the Password Box, then find the immediate next <button> tag
-        try:
-            target_btn = driver.find_element(By.XPATH, "//input[@type='password']/following::button[1]")
-            print(f"      + Found neighbor button! Text='{target_btn.text}'")
-        except:
-            print("      - Neighbor search failed. Trying generic submit.")
+        # This script finds the password box, looks below it, and clicks the LOGIN button
+        result = driver.execute_script("""
+            var passBox = arguments[0];
+            var passRect = passBox.getBoundingClientRect();
+            var limitY = passRect.bottom; // We only look below this line
             
-        if not target_btn:
-            try:
-                target_btn = driver.find_element(By.XPATH, "//button[@type='submit']")
-            except: pass
-
-        # 5. CLICK
-        if target_btn:
-            driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", target_btn)
-            time.sleep(1)
-            print("   -> Clicking...", flush=True)
+            var allElements = document.querySelectorAll('button, div, span, a, input[type="submit"]');
+            var target = null;
             
-            # JS Click is most reliable for mobile emulation
-            driver.execute_script("arguments[0].click();", target_btn)
-        else:
-            print("⚠️ No button found. Using ENTER key.", flush=True)
+            for (var i = 0; i < allElements.length; i++) {
+                var el = allElements[i];
+                var rect = el.getBoundingClientRect();
+                
+                // 1. Must be visible
+                if (rect.width === 0 || rect.height === 0) continue;
+                
+                // 2. Must be BELOW the password box
+                if (rect.top <= limitY) continue;
+                
+                // 3. Text Check
+                var txt = el.innerText ? el.innerText.toUpperCase() : "";
+                if (el.value) txt += el.value.toUpperCase(); // For input buttons
+                
+                // 4. Must say LOGIN or SIGN IN
+                if (txt.includes("LOG") || txt.includes("SIGN IN")) {
+                    
+                    // 5. Must NOT say REGISTER or RESTORE
+                    if (!txt.includes("REGISTER") && !txt.includes("RESTORE") && !txt.includes("FORGOT")) {
+                        target = el;
+                        break; // Stop at the first match (closest to password)
+                    }
+                }
+            }
+            
+            if (target) {
+                target.scrollIntoView({block: 'center'});
+                target.click();
+                return "CLICKED: " + target.innerText;
+            }
+            return "NOT_FOUND";
+        """, pass_in)
+        
+        print(f"   -> JS Result: {result}", flush=True)
+        
+        if result == "NOT_FOUND":
+            print("⚠️ JS failed. Using ENTER key fallback.", flush=True)
             pass_in.send_keys(Keys.ENTER)
 
-        # 6. Wait for Redirect
+        # 5. Wait for Redirect
         print("   -> Waiting for redirect...", flush=True)
         time.sleep(15)
         
