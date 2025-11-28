@@ -36,27 +36,39 @@ def send_telegram(message):
                           data={"chat_id": CHAT_ID, "text": message})
         except: pass
 
-# --- MOBILE EMULATION ---
+# --- BROWSER SETUP (CRASH PROOF MODE) ---
 def setup_driver():
-    print("   -> Launching Chrome (Pixel 5 Mode)...", flush=True)
+    print("   -> Launching Chrome (Manual Mobile Config)...", flush=True)
     opts = Options()
     opts.add_argument("--headless") 
     opts.add_argument("--no-sandbox")
     opts.add_argument("--disable-dev-shm-usage")
     
-    mobile_emulation = { "deviceName": "Pixel 5" }
-    opts.add_experimental_option("mobileEmulation", mobile_emulation)
+    # 1. DEFINE SIZE MANUALLY (Fixes 'Invalid Device' crash)
+    opts.add_argument("--window-size=393,851") 
     
+    # 2. DEFINE AGENT MANUALLY
+    mobile_ua = "Mozilla/5.0 (Linux; Android 11; Pixel 5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.91 Mobile Safari/537.36"
+    opts.add_argument(f"user-agent={mobile_ua}")
+    
+    # 3. MANUAL EMULATION DICTIONARY (Do NOT use 'deviceName')
+    opts.add_experimental_option("mobileEmulation", {
+        "deviceMetrics": { "width": 393, "height": 851, "pixelRatio": 3.0, "touch": True },
+        "userAgent": mobile_ua
+    })
+    
+    # Enable Logging
     opts.set_capability('goog:loggingPrefs', {'browser': 'ALL'})
     
     if os.environ.get("CHROME_BIN"): opts.binary_location = os.environ.get("CHROME_BIN")
     
     driver = webdriver.Chrome(options=opts)
-    driver.set_page_load_timeout(90) # Extended timeout for slow internet
+    driver.set_page_load_timeout(90)
     return driver
 
 # --- HELPER: WAKE UP INPUT ---
 def wake_up_input(driver, element):
+    """Forces the website to realize text has been typed"""
     driver.execute_script("""
         let el = arguments[0];
         el.dispatchEvent(new Event('input', { bubbles: true }));
@@ -70,7 +82,7 @@ def perform_login(driver):
     
     try:
         wait = WebDriverWait(driver, 30)
-        time.sleep(5)
+        time.sleep(3)
         
         # 1. Inputs
         wait.until(EC.presence_of_element_located((By.TAG_NAME, "input")))
@@ -88,37 +100,31 @@ def perform_login(driver):
         print("   -> Typing Credentials...", flush=True)
         phone_in.click(); phone_in.clear(); phone_in.send_keys(LOGIN_PHONE)
         time.sleep(0.5); wake_up_input(driver, phone_in)
-        
         # Blur phone
         driver.find_element(By.TAG_NAME, "body").click()
         
         pass_in.click(); pass_in.clear(); pass_in.send_keys(LOGIN_PASSWORD)
         time.sleep(0.5); wake_up_input(driver, pass_in)
-        
         # Blur password
         driver.find_element(By.TAG_NAME, "body").click()
         time.sleep(1)
 
-        # 3. STRATEGY A: ENTER KEY (With 30s Monitor)
-        print("   -> Attempting ENTER key submission...", flush=True)
+        # 3. STRATEGY A: ENTER KEY + 30s WAIT
+        print("   -> Pressing ENTER...", flush=True)
         pass_in.send_keys(Keys.RETURN)
         
-        print("   -> ⏳ Waiting up to 30 seconds for redirect...", flush=True)
-        
-        # We check every second for 30 seconds
+        print("   -> ⏳ Waiting up to 30 seconds for login to finish...", flush=True)
+        # Check status every second for 30 seconds
         for i in range(30):
+            # If URL changed or Title changed (no longer 'Sign in'), we are in!
             if "auth" not in driver.current_url and "Sign" not in driver.title:
                 print(f"      ✅ Success! Redirected after {i+1} seconds.", flush=True)
-                print(f"      -> New Title: {driver.title}", flush=True)
                 return True
             time.sleep(1)
             
-        print("   -> ⚠️ Enter key timed out (30s). Trying Strategy B...", flush=True)
+        print("   -> ⚠️ Enter key timed out (30s). Trying Strategy B (Button Click)...", flush=True)
 
-        # 4. STRATEGY B: CLICK BUTTON
-        print("   -> Hunting for Login Button...", flush=True)
-        
-        # Find ANY button that looks right
+        # 4. STRATEGY B: CLICK BUTTON + 30s WAIT
         btn = None
         candidates = driver.find_elements(By.XPATH, "//button | //input[@type='submit']")
         for c in candidates:
@@ -126,7 +132,7 @@ def perform_login(driver):
             if "login" in txt or "sign" in txt:
                 btn = c
                 break
-                
+        
         if btn:
             print(f"      -> Found button: {btn.text}", flush=True)
             driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", btn)
@@ -138,7 +144,7 @@ def perform_login(driver):
             print("      -> Button Clicked.", flush=True)
             
             # Wait another 30s
-            print("   -> ⏳ Waiting another 30s for redirect...", flush=True)
+            print("   -> ⏳ Waiting another 30s...", flush=True)
             for i in range(30):
                 if "auth" not in driver.current_url and "Sign" not in driver.title:
                     print(f"      ✅ Success! Redirected after {i+1} seconds.", flush=True)
@@ -147,7 +153,7 @@ def perform_login(driver):
         else:
             print("      -> No button found.", flush=True)
 
-        # Final Failure Report
+        # Final Failure Check
         print("❌ Login Failed. Dumping HTML info...", flush=True)
         body = driver.find_element(By.TAG_NAME, "body").text
         if "Invalid" in body:
