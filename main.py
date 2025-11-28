@@ -7,7 +7,7 @@ from flask import Flask
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
-from selenium.webdriver.common.keys import Keys # Critical for Enter key
+from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
@@ -80,12 +80,13 @@ def nuke_overlays(driver):
         driver.execute_script("""
             document.querySelectorAll('iframe').forEach(e => e.remove());
             document.querySelectorAll('div[class*="cookie"]').forEach(e => e.remove());
+            document.querySelectorAll('div[style*="z-index: 999"]').forEach(e => e.remove());
         """)
     except: pass
 
 # --- LOGIN LOGIC ---
 def perform_login(driver):
-    print("🔑 Detect Login Page. Starting DEEP SEARCH Login...", flush=True)
+    print("🔑 Detect Login Page. Starting FINAL FIX Login...", flush=True)
     
     try:
         wait = WebDriverWait(driver, 30)
@@ -109,59 +110,71 @@ def perform_login(driver):
         inject_value(driver, phone_in, LOGIN_PHONE)
         time.sleep(0.5)
         inject_value(driver, pass_in, LOGIN_PASSWORD)
-        time.sleep(1)
-
-        # 3. PRIORITY STRATEGY: ENTER KEY
-        print("   -> 1. Pressing ENTER Key...", flush=True)
-        try:
-            pass_in.send_keys(Keys.RETURN)
-        except:
-            print("      (Enter key error)", flush=True)
         
-        # 4. WAIT 30 SECONDS (Strict Requirement)
+        # CRITICAL PAUSE: Let the site realize the box is full
+        print("   -> Pausing 2s for UI update...", flush=True)
+        time.sleep(2)
+
+        # 3. FIND BUTTON
+        print("   -> Hunting for LOGIN Button...", flush=True)
+        btn = None
+        
+        # Try finding by TEXT
+        try:
+            # Looks for "LOGIN" in any element
+            btn = driver.find_element(By.XPATH, "//*[contains(translate(text(), 'LOGIN', 'login'), 'login')]")
+            if btn.tag_name not in ['button', 'div', 'a', 'span']: btn = None # Filter bad tags
+        except: pass
+        
+        # Try finding by TYPE
+        if not btn:
+            try: btn = driver.find_element(By.XPATH, "//button[@type='submit']")
+            except: pass
+            
+        if btn:
+            print(f"      -> Target Acquired: <{btn.tag_name}> '{btn.text}'", flush=True)
+            
+            # FORCE ENABLE (Remove disabled attribute)
+            driver.execute_script("arguments[0].removeAttribute('disabled');", btn)
+            driver.execute_script("arguments[0].classList.remove('disabled');", btn)
+            
+            # SCROLL
+            driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", btn)
+            time.sleep(1)
+            
+            # ATTACK 1: ActionChain Click (Physical)
+            print("      -> Click 1: Physical...", flush=True)
+            try:
+                actions = ActionChains(driver)
+                actions.move_to_element(btn).click().perform()
+            except: pass
+            
+            time.sleep(0.5)
+            
+            # ATTACK 2: JS Click (Direct)
+            print("      -> Click 2: JavaScript...", flush=True)
+            driver.execute_script("arguments[0].click();", btn)
+            
+        else:
+            print("      -> ⚠️ No Button Found. Skipping to Form Submit.", flush=True)
+
+        # ATTACK 3: FORM SUBMIT (The "Ghost" Submit)
+        print("   -> Action 3: Force Form Submit...", flush=True)
+        try:
+            driver.execute_script("document.querySelector('form').submit();")
+        except: 
+            print("      (No form tag found)", flush=True)
+
+        # 4. WAIT FOR REDIRECT
         print("   -> ⏳ Waiting 30 seconds for redirect...", flush=True)
         for i in range(30):
             if "auth" not in driver.current_url and "Sign" not in driver.title:
-                print(f"      ✅ Success! Redirected after {i+1} seconds.", flush=True)
+                print(f"      ✅ SUCCESS! Login Completed.", flush=True)
                 return True
             time.sleep(1)
-            
-        print("   -> ⚠️ Enter key timed out. Trying DEEP SEARCH BUTTON...", flush=True)
-        nuke_overlays(driver) # Clean again
-        
-        # 5. STRATEGY B: WILDCARD BUTTON SEARCH
-        # We look for ANY tag (*) that contains 'LOGIN' or is type 'submit'
-        targets = driver.find_elements(By.XPATH, "//*[contains(translate(text(), 'LOGIN', 'login'), 'login')] | //*[@type='submit']")
-        
-        valid_btn = None
-        for t in targets:
-            # Filter out hidden elements or script tags
-            if t.is_displayed() and t.tag_name not in ['script', 'style']:
-                print(f"      -> Candidate found: <{t.tag_name}> Text: '{t.text}'", flush=True)
-                valid_btn = t
-                # Prefer buttons over divs if multiple found
-                if t.tag_name == 'button':
-                    break
-        
-        if valid_btn:
-            print(f"      -> Clicking Best Candidate: <{valid_btn.tag_name}>", flush=True)
-            try:
-                driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", valid_btn)
-                time.sleep(0.5)
-                driver.execute_script("arguments[0].click();", valid_btn)
-            except Exception as e:
-                print(f"      -> Click Error: {e}", flush=True)
-            
-            # Wait another 15s
-            print("   -> ⏳ Waiting another 15s...", flush=True)
-            for i in range(15):
-                if "auth" not in driver.current_url: return True
-                time.sleep(1)
-        else:
-            print("      -> ❌ No Login button found on page.", flush=True)
 
         # Final Check
-        print("❌ Login Failed.", flush=True)
+        print("❌ Login Failed. Button clicks didn't trigger redirect.", flush=True)
         return False
 
     except Exception as e:
