@@ -9,6 +9,7 @@ from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
+from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 
@@ -36,19 +37,19 @@ def send_telegram(message):
                           data={"chat_id": CHAT_ID, "text": message})
         except: pass
 
-# --- BROWSER SETUP (MOBILE) ---
+# --- BROWSER SETUP (MOBILE STEALTH) ---
 def setup_driver():
-    print("   -> Launching Chrome (Mobile Mode)...", flush=True)
+    print("   -> Launching Chrome (Mobile Stealth)...", flush=True)
     opts = Options()
     opts.add_argument("--headless") 
     opts.add_argument("--no-sandbox")
     opts.add_argument("--disable-dev-shm-usage")
     
-    # 1. MOBILE EMULATION (Nexus 5X)
+    # MOBILE VIEW (Matches your screenshot)
     mobile_emulation = { "deviceName": "Nexus 5X" }
     opts.add_experimental_option("mobileEmulation", mobile_emulation)
     
-    # 2. STEALTH FLAGS
+    # STEALTH FLAGS (Critical for ReCaptcha)
     opts.add_argument("--disable-blink-features=AutomationControlled")
     opts.add_experimental_option("excludeSwitches", ["enable-automation"])
     opts.add_experimental_option("useAutomationExtension", False)
@@ -72,7 +73,7 @@ def robust_type(driver, element, text):
         element.send_keys(char)
         time.sleep(0.1)
     
-    # Force value update for React/Angular
+    # Force Value Update (Fixes 'Ghost Input')
     driver.execute_script("""
         arguments[0].dispatchEvent(new Event('input', { bubbles: true }));
         arguments[0].dispatchEvent(new Event('change', { bubbles: true }));
@@ -82,7 +83,7 @@ def robust_type(driver, element, text):
 
 # --- LOGIN ---
 def perform_login(driver):
-    print("🔑 Detect Login Page. Starting STRICT LOGIN...", flush=True)
+    print("🔑 Detect Login Page. Starting STRUCTURAL Login...", flush=True)
     
     try:
         wait = WebDriverWait(driver, 20)
@@ -104,39 +105,44 @@ def perform_login(driver):
         robust_type(driver, phone_in, LOGIN_PHONE)
         robust_type(driver, pass_in, LOGIN_PASSWORD)
         
-        # 3. STRICT BUTTON FINDER
-        print("   -> Hunting for 'LOGIN' Button (Excluding Register)...", flush=True)
+        # 3. INTERACT WITH CHECKBOX (Wakes up form)
+        try:
+            checkbox = driver.find_element(By.XPATH, "//input[@type='checkbox']")
+            driver.execute_script("arguments[0].click();", checkbox)
+        except: pass
+
+        # 4. STRUCTURAL BUTTON FINDER
+        # Strategy: Find the Password box, then find the FIRST button that appears in HTML after it.
+        print("   -> Hunting for Button BELOW Password box...", flush=True)
         
         target_btn = None
-        
-        # Get all visible buttons
-        buttons = driver.find_elements(By.TAG_NAME, "button")
-        
-        for btn in buttons:
-            if not btn.is_displayed(): continue
-            
-            txt = btn.text.upper()
-            cls = btn.get_attribute("class") or ""
-            
-            # --- THE FIX: STRICT EXCLUSIONS ---
-            if "REGISTER" in txt:
-                print(f"      - Skipped Register button: '{txt}'")
-                continue
-            if "SIGN UP" in txt:
-                print(f"      - Skipped Sign Up button: '{txt}'")
-                continue
-            if "RESTORE" in txt or "FORGOT" in txt:
-                continue
-            if "header" in cls.lower():
-                continue
+        try:
+            # XPath Explanation: Find password input -> Look at following elements -> Find first button
+            xpath = "//input[@type='password']/following::button[1]"
+            target_btn = driver.find_element(By.XPATH, xpath)
+            print(f"      + FOUND NEIGHBOR BUTTON: Text='{target_btn.text}'")
+        except:
+            print("      - Relative search failed. Trying generic search.")
+
+        # Fallback if relative search failed
+        if not target_btn:
+            buttons = driver.find_elements(By.TAG_NAME, "button")
+            for btn in buttons:
+                if not btn.is_displayed(): continue
+                txt = btn.text.upper()
+                cls = btn.get_attribute("class") or ""
                 
-            # MATCH ONLY LOGIN
-            if "LOG" in txt or "SIGN IN" in txt:
-                target_btn = btn
-                print(f"      + FOUND CORRECT BUTTON: '{txt}'")
-                break
+                # Exclude Header/Register/Restore
+                if "HEADER" in cls.upper() or "RESTORE" in txt or "REGISTER" in txt:
+                    continue
+                
+                # Must contain LOG or SIGN
+                if "LOG" in txt or "SIGN" in txt:
+                    target_btn = btn
+                    print(f"      + Found via Text: '{txt}'")
+                    break
         
-        # 4. CLICK
+        # 5. CLICK
         if target_btn:
             driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", target_btn)
             time.sleep(1)
@@ -146,10 +152,10 @@ def perform_login(driver):
             except:
                 driver.execute_script("arguments[0].click();", target_btn)
         else:
-            print("⚠️ Button not found. Trying ENTER key.", flush=True)
+            print("⚠️ No button found. Using ENTER key.", flush=True)
             pass_in.send_keys(Keys.ENTER)
 
-        # 5. Wait for Redirect
+        # 6. Wait for Redirect
         print("   -> Waiting for redirect...", flush=True)
         time.sleep(15)
         
