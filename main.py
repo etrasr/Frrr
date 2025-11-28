@@ -3,12 +3,11 @@ import requests
 import os
 import threading
 import sys
+import json
 from flask import Flask
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
-from selenium.webdriver.common.keys import Keys
-from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 
@@ -36,62 +35,80 @@ def send_telegram(message):
                           data={"chat_id": CHAT_ID, "text": message})
         except: pass
 
-# --- BROWSER SETUP (STABLE MOBILE) ---
+# --- BROWSER SETUP (CDP ENABLED) ---
 def setup_driver():
-    print("   -> Launching Chrome (Pixel 5 Mode)...", flush=True)
+    print("   -> Launching Chrome (Pixel 5 + CDP Mode)...", flush=True)
     opts = Options()
     opts.add_argument("--headless") 
     opts.add_argument("--no-sandbox")
     opts.add_argument("--disable-dev-shm-usage")
-    opts.add_argument("--window-size=393,851") 
+    opts.add_argument("--window-size=393,851") # Pixel 5
     
+    # Manual Mobile Emulation (Prevents 'Invalid Device' crash)
     mobile_ua = "Mozilla/5.0 (Linux; Android 11; Pixel 5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.91 Mobile Safari/537.36"
     opts.add_argument(f"user-agent={mobile_ua}")
-    
     opts.add_experimental_option("mobileEmulation", {
         "deviceMetrics": { "width": 393, "height": 851, "pixelRatio": 3.0, "touch": True },
         "userAgent": mobile_ua
     })
     
     opts.set_capability('goog:loggingPrefs', {'browser': 'ALL'})
-    
     if os.environ.get("CHROME_BIN"): opts.binary_location = os.environ.get("CHROME_BIN")
     
     driver = webdriver.Chrome(options=opts)
     driver.set_page_load_timeout(90)
     return driver
 
-# --- THE INPUT HACK ---
-def inject_value(driver, element, value):
-    """Bypasses React validation"""
-    driver.execute_script("""
-        let input = arguments[0];
-        let text = arguments[1];
-        let setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
-        setter.call(input, text);
-        input.dispatchEvent(new Event('input', { bubbles: true }));
-        input.dispatchEvent(new Event('change', { bubbles: true }));
-        input.dispatchEvent(new Event('blur', { bubbles: true }));
-    """, element, value)
-
-# --- CLEANER ---
-def nuke_overlays(driver):
+# --- CDP HELPER FUNCTIONS (THE ENGINE FIX) ---
+def cdp_click(driver, element):
+    """Calculates screen coordinates and clicks using the browser engine."""
     try:
-        driver.execute_script("""
-            document.querySelectorAll('iframe').forEach(e => e.remove());
-            document.querySelectorAll('div[class*="cookie"]').forEach(e => e.remove());
-            document.querySelectorAll('div[style*="z-index: 999"]').forEach(e => e.remove());
-        """)
-    except: pass
+        # Get coordinates
+        rect = driver.execute_script("return arguments[0].getBoundingClientRect();", element)
+        x = rect['x'] + (rect['width'] / 2)
+        y = rect['y'] + (rect['height'] / 2)
+        
+        # Simulate Touch Start
+        driver.execute_cdp_cmd("Input.dispatchTouchEvent", {
+            "type": "touchStart",
+            "touchPoints": [{"x": x, "y": y}]
+        })
+        # Simulate Touch End (Click)
+        driver.execute_cdp_cmd("Input.dispatchTouchEvent", {
+            "type": "touchEnd",
+            "touchPoints": []
+        })
+        print("      (CDP Touch Event Sent)", flush=True)
+    except Exception as e:
+        print(f"      (CDP Click failed: {e})", flush=True)
+
+def cdp_type(driver, text):
+    """Types text directly into the browser engine (Indistinguishable from human)."""
+    for char in text:
+        driver.execute_cdp_cmd("Input.dispatchKeyEvent", {
+            "type": "keyDown", "text": char, "unmodifiedText": char, "windowsVirtualKeyCode": ord(char), "nativeVirtualKeyCode": ord(char)
+        })
+        driver.execute_cdp_cmd("Input.dispatchKeyEvent", {
+            "type": "keyUp", "text": char, "unmodifiedText": char, "windowsVirtualKeyCode": ord(char), "nativeVirtualKeyCode": ord(char)
+        })
+        time.sleep(0.05) # Tiny delay between keys
+
+def cdp_enter(driver):
+    """Hits the Enter key at the hardware level."""
+    driver.execute_cdp_cmd("Input.dispatchKeyEvent", {
+        "type": "keyDown", "windowsVirtualKeyCode": 13, "nativeVirtualKeyCode": 13, "text": "\r", "unmodifiedText": "\r"
+    })
+    driver.execute_cdp_cmd("Input.dispatchKeyEvent", {
+        "type": "keyUp", "windowsVirtualKeyCode": 13, "nativeVirtualKeyCode": 13, "text": "\r", "unmodifiedText": "\r"
+    })
 
 # --- LOGIN LOGIC ---
 def perform_login(driver):
-    print("🔑 Detect Login Page. Starting FINAL FIX Login...", flush=True)
+    print("🔑 Detect Login Page. Starting HARDWARE SIMULATION Login...", flush=True)
     
     try:
         wait = WebDriverWait(driver, 30)
         time.sleep(5)
-        nuke_overlays(driver)
         
         # 1. Inputs
         wait.until(EC.presence_of_element_located((By.TAG_NAME, "input")))
@@ -105,76 +122,70 @@ def perform_login(driver):
         phone_in = visible[0]
         pass_in = visible[1]
         
-        # 2. INJECT Credentials
-        print("   -> Injecting Credentials...", flush=True)
-        inject_value(driver, phone_in, LOGIN_PHONE)
+        # 2. Type Credentials (CDP Mode)
+        print("   -> Typing Phone (Hardware Level)...", flush=True)
+        phone_in.click() # Focus
         time.sleep(0.5)
-        inject_value(driver, pass_in, LOGIN_PASSWORD)
+        cdp_type(driver, LOGIN_PHONE)
         
-        # CRITICAL PAUSE: Let the site realize the box is full
-        print("   -> Pausing 2s for UI update...", flush=True)
-        time.sleep(2)
+        time.sleep(1)
+        
+        print("   -> Typing Password (Hardware Level)...", flush=True)
+        pass_in.click() # Focus
+        time.sleep(0.5)
+        cdp_type(driver, LOGIN_PASSWORD)
+        
+        time.sleep(1)
 
-        # 3. FIND BUTTON
-        print("   -> Hunting for LOGIN Button...", flush=True)
+        # 3. ATTEMPT 1: HARDWARE ENTER
+        print("   -> Hitting ENTER (Hardware Level)...", flush=True)
+        cdp_enter(driver)
+        
+        # 4. WAIT 30 SECONDS
+        print("   -> ⏳ Waiting 30s for redirect...", flush=True)
+        for i in range(30):
+            if "auth" not in driver.current_url and "Sign" not in driver.title:
+                print(f"      ✅ Success! Redirected after {i+1} seconds.", flush=True)
+                return True
+            time.sleep(1)
+            
+        print("   -> ⚠️ Enter key timed out. Attempt 2: Button...", flush=True)
+        
+        # 5. ATTEMPT 2: HARDWARE TOUCH
         btn = None
-        
-        # Try finding by TEXT
         try:
-            # Looks for "LOGIN" in any element
+            # Try finding the specific login button text
             btn = driver.find_element(By.XPATH, "//*[contains(translate(text(), 'LOGIN', 'login'), 'login')]")
-            if btn.tag_name not in ['button', 'div', 'a', 'span']: btn = None # Filter bad tags
-        except: pass
-        
-        # Try finding by TYPE
-        if not btn:
+        except:
+            # Fallback to submit
             try: btn = driver.find_element(By.XPATH, "//button[@type='submit']")
             except: pass
             
         if btn:
-            print(f"      -> Target Acquired: <{btn.tag_name}> '{btn.text}'", flush=True)
-            
-            # FORCE ENABLE (Remove disabled attribute)
-            driver.execute_script("arguments[0].removeAttribute('disabled');", btn)
-            driver.execute_script("arguments[0].classList.remove('disabled');", btn)
-            
-            # SCROLL
+            print(f"      -> Found Button: {btn.text}", flush=True)
             driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", btn)
             time.sleep(1)
             
-            # ATTACK 1: ActionChain Click (Physical)
-            print("      -> Click 1: Physical...", flush=True)
-            try:
-                actions = ActionChains(driver)
-                actions.move_to_element(btn).click().perform()
-            except: pass
+            # Use CDP Touch
+            cdp_click(driver, btn)
             
-            time.sleep(0.5)
-            
-            # ATTACK 2: JS Click (Direct)
-            print("      -> Click 2: JavaScript...", flush=True)
-            driver.execute_script("arguments[0].click();", btn)
-            
+            # Wait another 20s
+            for i in range(20):
+                if "auth" not in driver.current_url: return True
+                time.sleep(1)
+        
+        # Final Failure
+        print("❌ Login Failed. Dumping Info...", flush=True)
+        body = driver.find_element(By.TAG_NAME, "body").text
+        
+        # Detect Errors
+        if "Invalid" in body or "Incorrect" in body:
+            send_telegram("❌ Login Failed: Website says Invalid Credentials")
+        elif "blocked" in body.lower():
+            send_telegram("❌ Login Failed: Account Blocked")
         else:
-            print("      -> ⚠️ No Button Found. Skipping to Form Submit.", flush=True)
-
-        # ATTACK 3: FORM SUBMIT (The "Ghost" Submit)
-        print("   -> Action 3: Force Form Submit...", flush=True)
-        try:
-            driver.execute_script("document.querySelector('form').submit();")
-        except: 
-            print("      (No form tag found)", flush=True)
-
-        # 4. WAIT FOR REDIRECT
-        print("   -> ⏳ Waiting 30 seconds for redirect...", flush=True)
-        for i in range(30):
-            if "auth" not in driver.current_url and "Sign" not in driver.title:
-                print(f"      ✅ SUCCESS! Login Completed.", flush=True)
-                return True
-            time.sleep(1)
-
-        # Final Check
-        print("❌ Login Failed. Button clicks didn't trigger redirect.", flush=True)
+            print(f"   -> PAGE DUMP: {body[:200]}", flush=True)
+            
         return False
 
     except Exception as e:
