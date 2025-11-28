@@ -4,11 +4,13 @@ import os
 import threading
 import sys
 import random
+import json
 from flask import Flask
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
+from selenium.webdriver.common.desired_capabilities import DesiredCapabilities
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 
@@ -36,55 +38,55 @@ def send_telegram(message):
                           data={"chat_id": CHAT_ID, "text": message})
         except: pass
 
-# --- HYBRID BROWSER SETUP ---
+# --- BROWSER SETUP ---
 def setup_driver():
-    print("   -> Launching Chrome (Hybrid Mode)...", flush=True)
+    print("   -> Launching Ultimate Chrome...", flush=True)
     opts = Options()
     opts.add_argument("--headless") 
     opts.add_argument("--no-sandbox")
     opts.add_argument("--disable-dev-shm-usage")
+    opts.add_argument("--window-size=375,812") # Mobile View
+    opts.add_argument("user-agent=Mozilla/5.0 (Linux; Android 10; SM-A205U) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/99.0.4844.88 Mobile Safari/537.36")
     
-    # 1. MOBILE DIMENSIONS (Matches your screenshot layout)
-    opts.add_argument("--window-size=375,812") 
-    
-    # 2. DESKTOP IDENTITY (To bypass ReCaptcha)
-    opts.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36")
-    
-    # 3. STEALTH FLAGS
-    opts.add_argument("--disable-blink-features=AutomationControlled")
-    opts.add_experimental_option("excludeSwitches", ["enable-automation"])
-    opts.add_experimental_option("useAutomationExtension", False)
+    # Enable Logging to catch hidden errors
+    d = DesiredCapabilities.CHROME
+    d['goog:loggingPrefs'] = { 'browser':'ALL' }
     
     if os.environ.get("CHROME_BIN"): opts.binary_location = os.environ.get("CHROME_BIN")
     
-    driver = webdriver.Chrome(options=opts)
-    
-    # Hide webdriver property
-    driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
-        "source": "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
-    })
-    
+    driver = webdriver.Chrome(options=opts, desired_capabilities=d)
     driver.set_page_load_timeout(60)
     return driver
 
-# --- SLOW TYPING ---
-def slow_type(driver, element, text):
-    driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", element)
-    element.click()
-    element.clear()
-    for char in text:
-        element.send_keys(char)
-        time.sleep(random.uniform(0.05, 0.2))
-    time.sleep(0.5)
+# --- HELPER: DUMP ERROR LOGS ---
+def dump_console_logs(driver):
+    print("   -> 🛑 DUMPING BROWSER LOGS (Why did it fail?):", flush=True)
+    try:
+        logs = driver.get_log('browser')
+        for log in logs:
+            if log['level'] == 'SEVERE':
+                print(f"      ❌ JS ERROR: {log['message']}", flush=True)
+            elif "403" in str(log) or "401" in str(log):
+                print(f"      ⛔ NETWORK BLOCK: {log['message']}", flush=True)
+    except:
+        print("      (Could not read logs)", flush=True)
 
-# --- LOGIN ---
+# --- LOGIN LOGIC ---
 def perform_login(driver):
-    print("🔑 Detect Login Page. Starting HYBRID Login...", flush=True)
+    print("🔑 Detect Login Page. Starting ULTIMATE Login...", flush=True)
     
     try:
         wait = WebDriverWait(driver, 20)
         
-        # 1. Inputs
+        # 1. Clear Overlays (Cookies/Banners)
+        try:
+            cookie_btn = driver.find_element(By.XPATH, "//button[contains(text(), 'Accept') or contains(text(), 'OK') or contains(text(), 'Allow')]")
+            driver.execute_script("arguments[0].click();", cookie_btn)
+            print("   -> Closed Cookie Banner.", flush=True)
+            time.sleep(1)
+        except: pass
+
+        # 2. Inputs
         wait.until(EC.presence_of_element_located((By.TAG_NAME, "input")))
         inputs = driver.find_elements(By.TAG_NAME, "input")
         visible = [i for i in inputs if i.is_displayed()]
@@ -96,55 +98,68 @@ def perform_login(driver):
         phone_in = visible[0]
         pass_in = visible[1]
         
-        # 2. Type Credentials
+        # 3. Type Credentials
         print("   -> Typing Credentials...", flush=True)
-        slow_type(driver, phone_in, LOGIN_PHONE)
+        phone_in.clear()
+        for char in LOGIN_PHONE:
+            phone_in.send_keys(char)
+            time.sleep(0.05)
+        
         time.sleep(0.5)
-        slow_type(driver, pass_in, LOGIN_PASSWORD)
         
-        # 3. Wait for ReCaptcha (Essential)
-        print("   -> Waiting 5s for token...", flush=True)
-        time.sleep(5)
+        pass_in.clear()
+        for char in LOGIN_PASSWORD:
+            pass_in.send_keys(char)
+            time.sleep(0.05)
+            
+        time.sleep(1)
+
+        # 4. THE TRIPLE TAP STRATEGY
+        print("   -> Executing Triple Tap Strategy...", flush=True)
         
-        # 4. FIND BUTTON (Case-Insensitive Search)
-        print("   -> Hunting for Button...", flush=True)
+        # A. Find the Submit Button (Priority 1)
         btn = None
         try:
-            # Look for button containing "log" or "Log" or "LOG"
-            xpath = "//button[contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'log')]"
-            btn = driver.find_element(By.XPATH, xpath)
-            print("   -> Found Button via text search!", flush=True)
+            # Look for type="submit" (The yellow button usually has this)
+            btn = driver.find_element(By.XPATH, "//button[@type='submit']")
+            print("      (Found 'Submit' Button)", flush=True)
         except:
+            # Fallback to Text
             try:
-                # Look for submit type
-                btn = driver.find_element(By.XPATH, "//button[@type='submit']")
-                print("   -> Found Button via type='submit'!", flush=True)
-            except:
-                print("⚠️ Button not found via XPath.", flush=True)
-
-        # 5. CLICK
+                btn = driver.find_element(By.XPATH, "//button[contains(text(), 'LOGIN')]")
+                print("      (Found 'Text' Button)", flush=True)
+            except: pass
+            
+        # B. Click Button
         if btn:
             try:
-                # Scroll and JS Click
                 driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", btn)
                 time.sleep(0.5)
                 driver.execute_script("arguments[0].click();", btn)
-                print("   -> Clicked Button.", flush=True)
-            except Exception as e:
-                print(f"   -> Click failed: {e}", flush=True)
-        else:
-            # Fallback: Tab then Enter
-            print("   -> Trying Tab+Enter fallback...", flush=True)
-            pass_in.send_keys(Keys.TAB)
-            time.sleep(0.5)
-            pass_in.send_keys(Keys.RETURN)
-
-        # 6. Verify
-        print("   -> Waiting for redirect...", flush=True)
+                print("      -> Action 1: Clicked Button.", flush=True)
+            except: pass
+            
+        # C. Press Enter (Backup)
+        time.sleep(1)
+        print("      -> Action 2: Pressing ENTER key...", flush=True)
+        pass_in.send_keys(Keys.RETURN)
+        
+        # 5. Wait for Redirect
+        print("   -> Waiting for result...", flush=True)
         time.sleep(15)
         
         if "auth" in driver.current_url or "Sign" in driver.title:
-            print("❌ Login Failed.", flush=True)
+            print("❌ Login Failed. Dumping info...", flush=True)
+            
+            # Check for onscreen errors
+            body = driver.find_element(By.TAG_NAME, "body").text
+            if "Invalid" in body:
+                print("   -> Site says: Invalid Username/Password", flush=True)
+                send_telegram("❌ Login Failed: Invalid Credentials.")
+            else:
+                # If no text error, check internal logs
+                dump_console_logs(driver)
+            
             return False
             
         print("✅ Login Successful!", flush=True)
@@ -152,6 +167,7 @@ def perform_login(driver):
 
     except Exception as e:
         print(f"❌ Login Crash: {e}", flush=True)
+        dump_console_logs(driver)
         return False
 
 # --- MONITOR ---
