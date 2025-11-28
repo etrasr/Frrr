@@ -36,19 +36,21 @@ def send_telegram(message):
                           data={"chat_id": CHAT_ID, "text": message})
         except: pass
 
-# --- BROWSER SETUP ---
+# --- BROWSER SETUP (HYBRID STEALTH) ---
 def setup_driver():
-    print("   -> Launching Chrome...", flush=True)
+    print("   -> Launching Chrome (Hybrid Stealth)...", flush=True)
     opts = Options()
     opts.add_argument("--headless") 
     opts.add_argument("--no-sandbox")
     opts.add_argument("--disable-dev-shm-usage")
     
-    # MOBILE EMULATION (Nexus 5X)
-    mobile_emulation = { "deviceName": "Nexus 5X" }
-    opts.add_experimental_option("mobileEmulation", mobile_emulation)
+    # MOBILE DIMENSIONS (To match your screenshot layout)
+    opts.add_argument("--window-size=375,812")
     
-    # STEALTH
+    # DESKTOP USER AGENT (To bypass ReCaptcha)
+    opts.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36")
+    
+    # STEALTH FLAGS
     opts.add_argument("--disable-blink-features=AutomationControlled")
     opts.add_experimental_option("excludeSwitches", ["enable-automation"])
     opts.add_experimental_option("useAutomationExtension", False)
@@ -56,6 +58,10 @@ def setup_driver():
     if os.environ.get("CHROME_BIN"): opts.binary_location = os.environ.get("CHROME_BIN")
     
     driver = webdriver.Chrome(options=opts)
+    driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
+        "source": "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
+    })
+    
     driver.set_page_load_timeout(60)
     return driver
 
@@ -63,27 +69,33 @@ def setup_driver():
 def robust_type(driver, element, text):
     driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", element)
     time.sleep(0.5)
-    try: element.click(); element.clear()
+    try:
+        element.click()
+        element.clear()
     except: pass
+    
+    # Type characters
     for char in text:
         element.send_keys(char)
         time.sleep(0.05)
-    # Force Value Update
+    
+    # Force Value & Events (Fixes ghost input)
     driver.execute_script("""
+        arguments[0].value = arguments[1];
         arguments[0].dispatchEvent(new Event('input', { bubbles: true }));
         arguments[0].dispatchEvent(new Event('change', { bubbles: true }));
         arguments[0].dispatchEvent(new Event('blur', { bubbles: true }));
-    """, element)
+    """, element, text)
     time.sleep(0.5)
 
 # --- LOGIN ---
 def perform_login(driver):
-    print("🔑 Detect Login Page. Starting SURGEON Login...", flush=True)
+    print("🔑 Detect Login Page. Starting FORM SUBMIT Login...", flush=True)
     
     try:
         wait = WebDriverWait(driver, 20)
         
-        # 1. Inputs
+        # 1. Find Inputs
         wait.until(EC.presence_of_element_located((By.TAG_NAME, "input")))
         inputs = driver.find_elements(By.TAG_NAME, "input")
         visible = [i for i in inputs if i.is_displayed()]
@@ -100,69 +112,51 @@ def perform_login(driver):
         robust_type(driver, phone_in, LOGIN_PHONE)
         robust_type(driver, pass_in, LOGIN_PASSWORD)
         
-        # 3. INTERACT WITH CHECKBOX
-        try:
-            checkbox = driver.find_element(By.XPATH, "//input[@type='checkbox']")
-            driver.execute_script("arguments[0].click();", checkbox)
-        except: pass
-
-        # 4. THE SURGEON SCRIPT (Javascript Search)
-        print("   -> Running JS Smart Search...", flush=True)
+        # 3. Wait a moment
+        time.sleep(2)
         
-        # This script finds the password box, looks below it, and clicks the LOGIN button
-        result = driver.execute_script("""
-            var passBox = arguments[0];
-            var passRect = passBox.getBoundingClientRect();
-            var limitY = passRect.bottom; // We only look below this line
+        # 4. STRATEGY A: DIRECT FORM SUBMISSION (The Fix)
+        print("   -> Attempting Direct Form Submission...", flush=True)
+        try:
+            # This finds the <form> holding the password and forces it to submit
+            driver.execute_script("arguments[0].form.requestSubmit();", pass_in)
+            print("      + Form Submit executed.", flush=True)
+        except Exception as e:
+            print(f"      - Form submit failed ({e}). Trying fallback.", flush=True)
             
-            var allElements = document.querySelectorAll('button, div, span, a, input[type="submit"]');
-            var target = null;
-            
-            for (var i = 0; i < allElements.length; i++) {
-                var el = allElements[i];
-                var rect = el.getBoundingClientRect();
+            # 5. STRATEGY B: SURGEON BUTTON CLICK (Fallback)
+            print("   -> Fallback: Searching for LOGIN button below password...", flush=True)
+            result = driver.execute_script("""
+                var passBox = arguments[0];
+                var passRect = passBox.getBoundingClientRect();
+                var limitY = passRect.bottom;
+                var allElements = document.querySelectorAll('button, input[type="submit"]');
+                var target = null;
                 
-                // 1. Must be visible
-                if (rect.width === 0 || rect.height === 0) continue;
-                
-                // 2. Must be BELOW the password box
-                if (rect.top <= limitY) continue;
-                
-                // 3. Text Check
-                var txt = el.innerText ? el.innerText.toUpperCase() : "";
-                if (el.value) txt += el.value.toUpperCase(); // For input buttons
-                
-                // 4. Must say LOGIN or SIGN IN
-                if (txt.includes("LOG") || txt.includes("SIGN IN")) {
+                for (var i = 0; i < allElements.length; i++) {
+                    var el = allElements[i];
+                    var rect = el.getBoundingClientRect();
                     
-                    // 5. Must NOT say REGISTER or RESTORE
-                    if (!txt.includes("REGISTER") && !txt.includes("RESTORE") && !txt.includes("FORGOT")) {
-                        target = el;
-                        break; // Stop at the first match (closest to password)
+                    if (rect.height === 0 || rect.top <= limitY) continue;
+                    
+                    var txt = (el.innerText || el.value || "").toUpperCase();
+                    if ((txt.includes("LOG") || txt.includes("SIGN")) && !txt.includes("REG") && !txt.includes("REST")) {
+                        el.click();
+                        return "CLICKED: " + txt;
                     }
                 }
-            }
-            
-            if (target) {
-                target.scrollIntoView({block: 'center'});
-                target.click();
-                return "CLICKED: " + target.innerText;
-            }
-            return "NOT_FOUND";
-        """, pass_in)
-        
-        print(f"   -> JS Result: {result}", flush=True)
-        
-        if result == "NOT_FOUND":
-            print("⚠️ JS failed. Using ENTER key fallback.", flush=True)
-            pass_in.send_keys(Keys.ENTER)
+                return "NOT_FOUND";
+            """, pass_in)
+            print(f"      + Fallback Result: {result}", flush=True)
 
-        # 5. Wait for Redirect
+        # 6. Wait for Redirect
         print("   -> Waiting for redirect...", flush=True)
         time.sleep(15)
         
         if "auth" in driver.current_url or "Sign" in driver.title:
             print("❌ Login Failed.", flush=True)
+            # Log HTML to debug if needed
+            # print(driver.page_source[:500]) 
             return False
             
         print("✅ Login Successful!", flush=True)
