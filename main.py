@@ -7,6 +7,7 @@ from flask import Flask
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
+from selenium.webdriver.common.keys import Keys # <--- FIXED: ADDED THIS MISSING IMPORT
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 
@@ -36,7 +37,7 @@ def send_telegram(message):
 
 # --- BROWSER SETUP (STABLE MOBILE MODE) ---
 def setup_driver():
-    print("   -> Launching Chrome (Manual Config)...", flush=True)
+    print("   -> Launching Chrome (Manual Mobile)...", flush=True)
     opts = Options()
     opts.add_argument("--headless") 
     opts.add_argument("--no-sandbox")
@@ -56,29 +57,23 @@ def setup_driver():
     })
     
     opts.set_capability('goog:loggingPrefs', {'browser': 'ALL'})
+    
     if os.environ.get("CHROME_BIN"): opts.binary_location = os.environ.get("CHROME_BIN")
     
     driver = webdriver.Chrome(options=opts)
     driver.set_page_load_timeout(90)
     return driver
 
-# --- THE INPUT HACK (CRITICAL FIX) ---
+# --- THE INPUT HACK (BYPASS REACT) ---
 def inject_value(driver, element, value):
     """
-    Bypasses React/Angular validation by using the native browser setter.
-    This forces the website to accept the input.
+    Bypasses React validation by injecting value directly into browser prototype.
     """
     driver.execute_script("""
         let input = arguments[0];
         let text = arguments[1];
-        
-        // 1. Get the native setter from the browser prototype
         let nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
-        
-        // 2. Call it directly on the input (Bypassing React's listeners)
         nativeInputValueSetter.call(input, text);
-        
-        // 3. Dispatch events to wake up the submit button
         input.dispatchEvent(new Event('input', { bubbles: true }));
         input.dispatchEvent(new Event('change', { bubbles: true }));
         input.dispatchEvent(new Event('blur', { bubbles: true }));
@@ -86,13 +81,13 @@ def inject_value(driver, element, value):
 
 # --- LOGIN LOGIC ---
 def perform_login(driver):
-    print("🔑 Detect Login Page. Starting INJECTION Login...", flush=True)
+    print("🔑 Detect Login Page. Starting LOGIC...", flush=True)
     
     try:
         wait = WebDriverWait(driver, 30)
         time.sleep(5)
         
-        # 1. Inputs
+        # 1. Find Inputs
         wait.until(EC.presence_of_element_located((By.TAG_NAME, "input")))
         inputs = driver.find_elements(By.TAG_NAME, "input")
         visible = [i for i in inputs if i.is_displayed()]
@@ -113,47 +108,47 @@ def perform_login(driver):
         inject_value(driver, pass_in, LOGIN_PASSWORD)
         time.sleep(1)
 
-        # 3. Find Button (By Text)
-        print("   -> Finding 'LOGIN' Button...", flush=True)
+        # 3. STRATEGY A: ENTER KEY (Priority)
+        print("   -> Pressing ENTER Key...", flush=True)
+        pass_in.send_keys(Keys.RETURN)
+        
+        # 4. WAIT 30 SECONDS (As requested)
+        print("   -> ⏳ Waiting 30 seconds for login to finish...", flush=True)
+        for i in range(30):
+            # Check if we moved away from auth page
+            if "auth" not in driver.current_url and "Sign" not in driver.title:
+                print(f"      ✅ Success! Redirected after {i+1} seconds.", flush=True)
+                return True
+            time.sleep(1)
+            
+        print("   -> ⚠️ Enter key timed out. Trying BUTTON CLICK...", flush=True)
+        
+        # 5. STRATEGY B: FIND & CLICK BUTTON
         btn = None
         try:
-            # Look for explicit LOGIN text
-            btn = driver.find_element(By.XPATH, "//button[contains(text(), 'LOGIN')]")
+            # Look for explicit LOGIN text (case insensitive)
+            btn = driver.find_element(By.XPATH, "//*[contains(translate(text(), 'LOGIN', 'login'), 'login')]")
         except:
-            # Fallback to submit type
             try: btn = driver.find_element(By.XPATH, "//button[@type='submit']")
             except: pass
             
         if btn:
-            print(f"      -> Found: {btn.text}", flush=True)
+            print(f"      -> Found Button: {btn.text}", flush=True)
             driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", btn)
             time.sleep(1)
-            
-            # CLICK
-            print("      -> Clicking Button...", flush=True)
             driver.execute_script("arguments[0].click();", btn)
+            print("      -> JS Click Executed.", flush=True)
             
-            # 4. WAIT 30 SECONDS (As requested)
-            print("   -> ⏳ Waiting 30 seconds for login to finish...", flush=True)
+            # Wait another 30s
+            print("   -> ⏳ Waiting another 30 seconds...", flush=True)
             for i in range(30):
                 if "auth" not in driver.current_url and "Sign" not in driver.title:
-                    print(f"      ✅ Success! Redirected after {i+1} seconds.", flush=True)
+                    print(f"      ✅ Success! Redirected.", flush=True)
                     return True
                 time.sleep(1)
-                
-            print("   -> ⚠️ Button click timed out. Trying ENTER key...", flush=True)
         
-        # 5. Backup: Enter Key
-        pass_in.send_keys(Keys.RETURN)
-        print("   -> Pressed ENTER. Waiting 30s...", flush=True)
-        time.sleep(30)
-        
-        # Final Check
-        if "auth" not in driver.current_url and "Sign" not in driver.title:
-            print("      ✅ Success! Redirected.", flush=True)
-            return True
-
-        print("❌ Login Failed.", flush=True)
+        # Final Failure Check
+        print("❌ Login Failed. Dumping Page Text...", flush=True)
         body = driver.find_element(By.TAG_NAME, "body").text
         if "Invalid" in body:
             send_telegram("❌ Login Failed: Invalid Credentials")
