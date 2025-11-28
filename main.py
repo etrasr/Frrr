@@ -37,7 +37,7 @@ def send_telegram(message):
                           data={"chat_id": CHAT_ID, "text": message})
         except: pass
 
-# --- BROWSER SETUP ---
+# --- BROWSER SETUP (STEALTH DESKTOP) ---
 def setup_driver():
     print("   -> Launching Chrome...", flush=True)
     opts = Options()
@@ -62,30 +62,36 @@ def setup_driver():
     driver.set_page_load_timeout(60)
     return driver
 
-# --- HELPER: SLOW TYPE ---
+# --- CRITICAL HELPER: FORCE VALUE UPDATE ---
+def force_react_update(driver, element):
+    """Forces React/Angular to recognize the value change"""
+    driver.execute_script("""
+        let tracker = arguments[0]._valueTracker;
+        if (tracker) { tracker.setValue(null); }
+        arguments[0].dispatchEvent(new Event('input', { bubbles: true }));
+        arguments[0].dispatchEvent(new Event('change', { bubbles: true }));
+    """, element)
+
 def slow_type(driver, element, text):
     driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", element)
     element.click()
     element.clear()
     for char in text:
         element.send_keys(char)
-        time.sleep(random.uniform(0.05, 0.2))
+        time.sleep(random.uniform(0.05, 0.15))
     
-    # Trigger events to enable button
-    driver.execute_script("""
-        arguments[0].dispatchEvent(new Event('input', { bubbles: true }));
-        arguments[0].dispatchEvent(new Event('change', { bubbles: true }));
-    """, element)
+    # FORCE UPDATE
+    force_react_update(driver, element)
     time.sleep(0.5)
 
 # --- LOGIN ---
 def perform_login(driver):
-    print("🔑 Detect Login Page. Starting TARGETED Login...", flush=True)
+    print("🔑 Detect Login Page. Starting FINAL Login...", flush=True)
     
     try:
         wait = WebDriverWait(driver, 20)
         
-        # 1. Find Inputs
+        # 1. Inputs
         wait.until(EC.presence_of_element_located((By.TAG_NAME, "input")))
         inputs = driver.find_elements(By.TAG_NAME, "input")
         visible = [i for i in inputs if i.is_displayed()]
@@ -98,51 +104,45 @@ def perform_login(driver):
         pass_in = visible[1]
         
         # 2. Type Credentials
-        print("   -> Typing Phone...", flush=True)
+        print("   -> Typing Credentials...", flush=True)
         slow_type(driver, phone_in, LOGIN_PHONE)
-        
-        print("   -> Typing Password...", flush=True)
         slow_type(driver, pass_in, LOGIN_PASSWORD)
         
-        # 3. Wait for Security Check
-        print("   -> Waiting 5s for validation...", flush=True)
-        time.sleep(5)
+        # 3. Wait for validation
+        time.sleep(3)
         
-        # 4. FIND THE REAL LOGIN BUTTON
-        print("   -> Hunting for 'LOGIN' button...", flush=True)
-        
+        # 4. FIND BUTTON (Using the logic that worked last time)
+        print("   -> Finding LOGIN button...", flush=True)
         target_btn = None
         
-        # Try finding a button that contains "log" or "Log" or "LOG" (Case insensitive)
         try:
             xpath = "//button[contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'log')]"
-            potential_btns = driver.find_elements(By.XPATH, xpath)
-            
-            for btn in potential_btns:
-                if btn.is_displayed():
-                    txt = btn.text.lower()
-                    # Avoid 'Restore' or 'Register' buttons if they somehow matched
-                    if "rest" not in txt and "reg" not in txt:
-                        target_btn = btn
-                        break
+            potential = driver.find_elements(By.XPATH, xpath)
+            for btn in potential:
+                if btn.is_displayed() and "rest" not in btn.text.lower():
+                    target_btn = btn
+                    break
         except: pass
-        
-        # Fallback: Look for type="submit"
-        if not target_btn:
-            try:
-                target_btn = driver.find_element(By.XPATH, "//button[@type='submit']")
-            except: pass
 
-        # 5. CLICK
+        # 5. CLICK STRATEGY
         if target_btn:
             print(f"   -> Found Button: '{target_btn.text}'", flush=True)
+            
+            # A. Scroll to center
+            driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", target_btn)
+            time.sleep(1)
+            
+            # B. Attempt Physical Mouse Click (ActionChains)
+            # This is better than JS click for frameworks
+            print("   -> Attempting PHYSICAL Mouse Click...", flush=True)
             try:
-                # Force click via JS
-                driver.execute_script("arguments[0].click();", target_btn)
+                actions = ActionChains(driver)
+                actions.move_to_element(target_btn).click().perform()
             except:
-                target_btn.click()
+                print("   -> Physical click failed, using JS Force Click...", flush=True)
+                driver.execute_script("arguments[0].click();", target_btn)
         else:
-            print("⚠️ Could not find button. Using ENTER key.", flush=True)
+            print("   -> Button not found. Using Enter Key.", flush=True)
             pass_in.send_keys(Keys.ENTER)
 
         # 6. Wait for Redirect
