@@ -9,7 +9,6 @@ from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
-from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 
@@ -45,11 +44,9 @@ def setup_driver():
     opts.add_argument("--no-sandbox")
     opts.add_argument("--disable-dev-shm-usage")
     
-    # MOBILE VIEW (Matches your screenshot)
     mobile_emulation = { "deviceName": "Nexus 5X" }
     opts.add_experimental_option("mobileEmulation", mobile_emulation)
     
-    # STEALTH FLAGS (Critical for ReCaptcha)
     opts.add_argument("--disable-blink-features=AutomationControlled")
     opts.add_experimental_option("excludeSwitches", ["enable-automation"])
     opts.add_experimental_option("useAutomationExtension", False)
@@ -64,26 +61,18 @@ def setup_driver():
 def robust_type(driver, element, text):
     driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", element)
     time.sleep(0.5)
-    try:
-        element.click()
-        element.clear()
+    try: element.click(); element.clear()
     except: pass
-    
     for char in text:
         element.send_keys(char)
-        time.sleep(0.1)
-    
-    # Force Value Update (Fixes 'Ghost Input')
-    driver.execute_script("""
-        arguments[0].dispatchEvent(new Event('input', { bubbles: true }));
-        arguments[0].dispatchEvent(new Event('change', { bubbles: true }));
-        arguments[0].dispatchEvent(new Event('blur', { bubbles: true }));
-    """, element)
+        time.sleep(0.05)
+    # Force React Update
+    driver.execute_script("arguments[0].dispatchEvent(new Event('input', { bubbles: true }));", element)
     time.sleep(0.5)
 
-# --- LOGIN ---
+# --- LOGIN LOGIC ---
 def perform_login(driver):
-    print("🔑 Detect Login Page. Starting STRUCTURAL Login...", flush=True)
+    print("🔑 Detect Login Page. Starting GEOMETRIC Login...", flush=True)
     
     try:
         wait = WebDriverWait(driver, 20)
@@ -105,54 +94,58 @@ def perform_login(driver):
         robust_type(driver, phone_in, LOGIN_PHONE)
         robust_type(driver, pass_in, LOGIN_PASSWORD)
         
-        # 3. INTERACT WITH CHECKBOX (Wakes up form)
+        # 3. INTERACT WITH CHECKBOX (Wake up form)
         try:
             checkbox = driver.find_element(By.XPATH, "//input[@type='checkbox']")
             driver.execute_script("arguments[0].click();", checkbox)
         except: pass
 
-        # 4. STRUCTURAL BUTTON FINDER
-        # Strategy: Find the Password box, then find the FIRST button that appears in HTML after it.
-        print("   -> Hunting for Button BELOW Password box...", flush=True)
+        # 4. GEOMETRIC BUTTON FINDER
+        print("   -> Scanning based on Coordinates...", flush=True)
+        
+        # Get Y-Coordinate of Password Box
+        pass_rect = pass_in.rect
+        pass_y = pass_rect['y'] + pass_rect['height']
+        print(f"      Password Box ends at Y={pass_y}", flush=True)
+        
+        # Find ALL potential buttons (Button tag, Input Submit, or Divs looking like buttons)
+        candidates = driver.find_elements(By.XPATH, "//button | //input[@type='submit'] | //div[contains(@class, 'button')]")
         
         target_btn = None
-        try:
-            # XPath Explanation: Find password input -> Look at following elements -> Find first button
-            xpath = "//input[@type='password']/following::button[1]"
-            target_btn = driver.find_element(By.XPATH, xpath)
-            print(f"      + FOUND NEIGHBOR BUTTON: Text='{target_btn.text}'")
-        except:
-            print("      - Relative search failed. Trying generic search.")
-
-        # Fallback if relative search failed
-        if not target_btn:
-            buttons = driver.find_elements(By.TAG_NAME, "button")
-            for btn in buttons:
-                if not btn.is_displayed(): continue
-                txt = btn.text.upper()
-                cls = btn.get_attribute("class") or ""
-                
-                # Exclude Header/Register/Restore
-                if "HEADER" in cls.upper() or "RESTORE" in txt or "REGISTER" in txt:
-                    continue
-                
-                # Must contain LOG or SIGN
-                if "LOG" in txt or "SIGN" in txt:
-                    target_btn = btn
-                    print(f"      + Found via Text: '{txt}'")
-                    break
+        
+        for btn in candidates:
+            if not btn.is_displayed(): continue
+            
+            # Get Button Data
+            txt = btn.text.upper()
+            rect = btn.rect
+            btn_y = rect['y']
+            
+            # CRITERIA 1: Must be BELOW password box
+            if btn_y <= pass_y:
+                continue 
+            
+            # CRITERIA 2: Must NOT be Register/Restore
+            if "REGISTER" in txt or "RESTORE" in txt or "FORGOT" in txt:
+                continue
+            
+            # CRITERIA 3: Must contain LOGIN or SIGN IN
+            if "LOG" in txt or "SIGN" in txt or btn.get_attribute("type") == "submit":
+                print(f"      + MATCH FOUND! Text='{txt}' at Y={btn_y}")
+                target_btn = btn
+                break # We take the FIRST valid button below password
         
         # 5. CLICK
         if target_btn:
             driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", target_btn)
             time.sleep(1)
-            print("   -> Clicking...", flush=True)
+            print(f"   -> Clicking Button: {target_btn.text}", flush=True)
             try:
                 target_btn.click()
             except:
                 driver.execute_script("arguments[0].click();", target_btn)
         else:
-            print("⚠️ No button found. Using ENTER key.", flush=True)
+            print("⚠️ No geometric match. Using ENTER key.", flush=True)
             pass_in.send_keys(Keys.ENTER)
 
         # 6. Wait for Redirect
