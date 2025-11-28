@@ -13,7 +13,7 @@ CHAT_ID = os.environ.get("CHAT_ID")
 LOGIN_PHONE = os.environ.get("LOGIN_PHONE")
 LOGIN_PASSWORD = os.environ.get("LOGIN_PASSWORD")
 
-# The specific game URL
+# We stick to the game URL. The site will redirect us to Login automatically.
 GAME_URL = "https://flashsport.bet/en/casino?game=%2Fkeno1675&returnUrl=casino"
 
 def send_telegram(message):
@@ -31,7 +31,6 @@ def setup_driver():
     chrome_options.add_argument("--no-sandbox")
     chrome_options.add_argument("--disable-dev-shm-usage")
     chrome_options.add_argument("--window-size=1920,1080")
-    # Mobile User Agent
     chrome_options.add_argument("user-agent=Mozilla/5.0 (Linux; Android 10; SM-G981B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/80.0.3987.162 Mobile Safari/537.36")
     
     if os.environ.get("CHROME_BIN"):
@@ -43,39 +42,52 @@ def perform_login(driver):
     print("🔑 Detect Login Page. Attempting to Log In...")
     
     try:
-        wait = WebDriverWait(driver, 10)
+        wait = WebDriverWait(driver, 15)
         
-        # 1. Find Phone Field (Looking for input type 'tel' or name containing 'phone')
+        # 1. Enter Phone
+        print("   - Typing phone...")
         phone_input = wait.until(EC.presence_of_element_located((By.XPATH, "//input[@type='tel' or contains(@name, 'phone') or contains(@placeholder, 'Phone')]")))
         phone_input.clear()
         phone_input.send_keys(LOGIN_PHONE)
-        print("   - Phone entered.")
         
-        # 2. Find Password Field
+        # 2. Enter Password
+        print("   - Typing password...")
         pass_input = driver.find_element(By.XPATH, "//input[@type='password']")
         pass_input.clear()
         pass_input.send_keys(LOGIN_PASSWORD)
-        print("   - Password entered.")
         
-        # 3. Click Login Button
-        # Looking for a button that says "Log" or "Sign" inside it
-        login_btn = driver.find_element(By.XPATH, "//button[contains(., 'Log') or contains(., 'Sign')]")
-        driver.execute_script("arguments[0].click();", login_btn)
-        print("   - Login button clicked.")
+        # 3. Click the Yellow LOGIN button
+        # We look for the exact text "LOGIN" as seen in your photo
+        print("   - Clicking LOGIN button...")
+        try:
+            # Try to find the button with text 'LOGIN'
+            login_btn = driver.find_element(By.XPATH, "//*[text()='LOGIN']")
+            # Use JavaScript click (works better on mobile views)
+            driver.execute_script("arguments[0].click();", login_btn)
+        except:
+            # Fallback: Try searching for a button tag containing 'Login'
+            login_btn = driver.find_element(By.XPATH, "//button[contains(., 'LOGIN')]")
+            driver.execute_script("arguments[0].click();", login_btn)
+            
         
-        time.sleep(10) # Wait for redirect
-        print(f"   - Page title after login: {driver.title}")
+        # 4. Wait for Redirect
+        print("   - Waiting for game to load...")
+        time.sleep(10)
+        
+        # 5. Verification
+        if "Login" in driver.title or "Auth" in driver.title:
+            print("❌ Still on Login page. Check credentials.")
+            return False
+            
+        print(f"   - Success! Page title: {driver.title}")
         return True
         
     except Exception as e:
-        print(f"❌ Login Failed: {e}")
+        print(f"❌ Login Error: {e}")
         return False
 
 def find_game_grid(driver):
-    """
-    Scans for Keno grid in main page and iframes.
-    """
-    print("🔎 Scanning for Keno grid (Numbers 1-80)...")
+    print("🔎 Scanning for Keno grid...")
     
     # 1. Check Main Page
     cls = detect_grid_logic(driver)
@@ -107,6 +119,7 @@ def detect_grid_logic(driver):
             if not class_name: continue
             base_class = class_name.split()[0]
             siblings = driver.find_elements(By.CLASS_NAME, base_class)
+            # Keno has 80 numbers
             if 70 <= len(siblings) <= 90:
                 return base_class
     except:
@@ -115,7 +128,7 @@ def detect_grid_logic(driver):
 
 def main():
     if not LOGIN_PHONE or not LOGIN_PASSWORD:
-        print("❌ Error: Missing LOGIN_PHONE or LOGIN_PASSWORD in Render Environment.")
+        print("❌ Error: Missing credentials.")
         return
 
     driver = setup_driver()
@@ -124,38 +137,37 @@ def main():
     try:
         driver.get(GAME_URL)
         time.sleep(5)
-        print(f"📄 Initial Title: {driver.title}")
         
-        # Check if we are on the Sign In page
-        if "Sign in" in driver.title or "Login" in driver.title:
+        # LOGIN LOGIC
+        # If the title or URL indicates we are on the auth page
+        if "Sign in" in driver.title or "Login" in driver.title or "auth" in driver.current_url:
             success = perform_login(driver)
-            if success:
-                # Reload the game URL to be sure we are in the right place
-                driver.get(GAME_URL)
-                time.sleep(10)
-            else:
-                send_telegram("❌ Login failed. Check logs.")
+            if not success:
                 return
+            
+            # Force reload the game URL to ensure we are in the Casino section
+            driver.get(GAME_URL)
+            time.sleep(10)
 
-        # Now look for the game
+        # FIND GRID
         keno_class = find_game_grid(driver)
         
         if not keno_class:
-            send_telegram(f"❌ Failed to find numbers. Current Title: {driver.title}")
+            send_telegram(f"❌ Failed to find numbers. Stuck on: {driver.title}")
             return
 
-        msg = f"✅ LOCKED ON! Tracking numbers via class: '{keno_class}'"
+        msg = f"✅ LOCKED ON! Tracking via class: '{keno_class}'"
         print(msg)
         send_telegram(msg)
         
         last_alert_numbers = []
         
         while True:
-            # JavaScript to find flashing items
             script = f"""
             var changed_numbers = [];
             var elements = document.getElementsByClassName('{keno_class}');
             for (var i = 0; i < elements.length; i++) {{
+                // If class name is longer, it implies a color change (modifier class)
                 if (elements[i].className.length > '{keno_class}'.length + 2) {{
                     changed_numbers.push(elements[i].innerText);
                 }}
@@ -176,7 +188,6 @@ def main():
                             last_alert_numbers = active_numbers
             except:
                 break
-                
             time.sleep(0.1)
             
     except Exception as e:
