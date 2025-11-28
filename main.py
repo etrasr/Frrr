@@ -7,7 +7,8 @@ from flask import Flask
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
-from selenium.webdriver.common.keys import Keys # <--- FIXED: ADDED THIS MISSING IMPORT
+from selenium.webdriver.common.keys import Keys
+from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 
@@ -35,59 +36,69 @@ def send_telegram(message):
                           data={"chat_id": CHAT_ID, "text": message})
         except: pass
 
-# --- BROWSER SETUP (STABLE MOBILE MODE) ---
+# --- BROWSER SETUP (STABLE MOBILE) ---
 def setup_driver():
-    print("   -> Launching Chrome (Manual Mobile)...", flush=True)
+    print("   -> Launching Chrome (Pixel 5 Mode)...", flush=True)
     opts = Options()
     opts.add_argument("--headless") 
     opts.add_argument("--no-sandbox")
     opts.add_argument("--disable-dev-shm-usage")
-    
-    # 1. Size
     opts.add_argument("--window-size=393,851") 
     
-    # 2. User Agent
     mobile_ua = "Mozilla/5.0 (Linux; Android 11; Pixel 5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.91 Mobile Safari/537.36"
     opts.add_argument(f"user-agent={mobile_ua}")
     
-    # 3. Emulation (Manual Dictionary to prevent crashes)
     opts.add_experimental_option("mobileEmulation", {
         "deviceMetrics": { "width": 393, "height": 851, "pixelRatio": 3.0, "touch": True },
         "userAgent": mobile_ua
     })
     
     opts.set_capability('goog:loggingPrefs', {'browser': 'ALL'})
-    
     if os.environ.get("CHROME_BIN"): opts.binary_location = os.environ.get("CHROME_BIN")
     
     driver = webdriver.Chrome(options=opts)
     driver.set_page_load_timeout(90)
     return driver
 
-# --- THE INPUT HACK (BYPASS REACT) ---
-def inject_value(driver, element, value):
+# --- HYBRID TYPING (Physical + Injection) ---
+def hybrid_fill(driver, element, value):
     """
-    Bypasses React validation by injecting value directly into browser prototype.
+    1. Clicks to focus (Critical)
+    2. Types physically
+    3. Injects logic backup
     """
+    # 1. Physical Focus & Type
+    driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", element)
+    time.sleep(0.5)
+    element.click() # FOCUS
+    element.clear()
+    
+    actions = ActionChains(driver)
+    actions.click(element)
+    for char in value:
+        actions.send_keys(char)
+        actions.pause(0.05)
+    actions.perform()
+    
+    # 2. Logic Injection (Backup for React)
     driver.execute_script("""
         let input = arguments[0];
         let text = arguments[1];
-        let nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
-        nativeInputValueSetter.call(input, text);
+        let setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+        setter.call(input, text);
         input.dispatchEvent(new Event('input', { bubbles: true }));
         input.dispatchEvent(new Event('change', { bubbles: true }));
-        input.dispatchEvent(new Event('blur', { bubbles: true }));
     """, element, value)
 
 # --- LOGIN LOGIC ---
 def perform_login(driver):
-    print("🔑 Detect Login Page. Starting LOGIC...", flush=True)
+    print("🔑 Detect Login Page. Starting HYBRID Login...", flush=True)
     
     try:
         wait = WebDriverWait(driver, 30)
         time.sleep(5)
         
-        # 1. Find Inputs
+        # 1. Inputs
         wait.until(EC.presence_of_element_located((By.TAG_NAME, "input")))
         inputs = driver.find_elements(By.TAG_NAME, "input")
         visible = [i for i in inputs if i.is_displayed()]
@@ -99,56 +110,52 @@ def perform_login(driver):
         phone_in = visible[0]
         pass_in = visible[1]
         
-        # 2. INJECT Credentials
-        print("   -> Injecting Phone...", flush=True)
-        inject_value(driver, phone_in, LOGIN_PHONE)
-        time.sleep(1)
+        # 2. Fill Credentials
+        print("   -> Filling Phone...", flush=True)
+        hybrid_fill(driver, phone_in, LOGIN_PHONE)
         
-        print("   -> Injecting Password...", flush=True)
-        inject_value(driver, pass_in, LOGIN_PASSWORD)
+        print("   -> Filling Password...", flush=True)
+        hybrid_fill(driver, pass_in, LOGIN_PASSWORD)
+        
         time.sleep(1)
 
-        # 3. STRATEGY A: ENTER KEY (Priority)
-        print("   -> Pressing ENTER Key...", flush=True)
+        # 3. SUBMIT STRATEGY A: DIRECT FORM SUBMIT
+        print("   -> Attempting Form Submit (Bypasses Button)...", flush=True)
+        try:
+            driver.execute_script("document.querySelector('form').submit();")
+            print("      (Form submit executed)", flush=True)
+        except:
+            print("      (No <form> tag found, skipping)", flush=True)
+
+        # 4. SUBMIT STRATEGY B: FOCUSED ENTER
+        print("   -> Attempting Focused ENTER...", flush=True)
+        pass_in.click() # Ensure focus is strictly on password box
+        time.sleep(0.2)
         pass_in.send_keys(Keys.RETURN)
         
-        # 4. WAIT 30 SECONDS (As requested)
-        print("   -> ⏳ Waiting 30 seconds for login to finish...", flush=True)
+        # 5. WAIT 30 SECONDS
+        print("   -> ⏳ Waiting 30s for redirect...", flush=True)
         for i in range(30):
-            # Check if we moved away from auth page
             if "auth" not in driver.current_url and "Sign" not in driver.title:
                 print(f"      ✅ Success! Redirected after {i+1} seconds.", flush=True)
                 return True
             time.sleep(1)
             
-        print("   -> ⚠️ Enter key timed out. Trying BUTTON CLICK...", flush=True)
-        
-        # 5. STRATEGY B: FIND & CLICK BUTTON
-        btn = None
+        # 6. FAILSAFE: BUTTON CLICK
+        print("   -> ⚠️ Timeout. Trying Button Click...", flush=True)
         try:
-            # Look for explicit LOGIN text (case insensitive)
-            btn = driver.find_element(By.XPATH, "//*[contains(translate(text(), 'LOGIN', 'login'), 'login')]")
-        except:
-            try: btn = driver.find_element(By.XPATH, "//button[@type='submit']")
-            except: pass
-            
-        if btn:
-            print(f"      -> Found Button: {btn.text}", flush=True)
-            driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", btn)
-            time.sleep(1)
+            btn = driver.find_element(By.XPATH, "//button[contains(text(), 'LOGIN')]")
             driver.execute_script("arguments[0].click();", btn)
-            print("      -> JS Click Executed.", flush=True)
+            print("      (Clicked LOGIN)", flush=True)
             
-            # Wait another 30s
-            print("   -> ⏳ Waiting another 30 seconds...", flush=True)
-            for i in range(30):
-                if "auth" not in driver.current_url and "Sign" not in driver.title:
-                    print(f"      ✅ Success! Redirected.", flush=True)
-                    return True
+            # Wait another 15s
+            for i in range(15):
+                if "auth" not in driver.current_url: return True
                 time.sleep(1)
-        
-        # Final Failure Check
-        print("❌ Login Failed. Dumping Page Text...", flush=True)
+        except: pass
+
+        # Final Check
+        print("❌ Login Failed.", flush=True)
         body = driver.find_element(By.TAG_NAME, "body").text
         if "Invalid" in body:
             send_telegram("❌ Login Failed: Invalid Credentials")
