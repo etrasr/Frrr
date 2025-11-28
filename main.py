@@ -37,16 +37,16 @@ def send_telegram(message):
                           data={"chat_id": CHAT_ID, "text": message})
         except: pass
 
-# --- BROWSER SETUP (STEALTH DESKTOP) ---
+# --- BROWSER SETUP (DESKTOP STEALTH) ---
 def setup_driver():
-    print("   -> Launching Chrome (Stealth Desktop)...", flush=True)
+    print("   -> Launching Chrome (Desktop Stealth)...", flush=True)
     opts = Options()
     opts.add_argument("--headless") 
     opts.add_argument("--no-sandbox")
     opts.add_argument("--disable-dev-shm-usage")
     opts.add_argument("--window-size=1920,1080")
     
-    # STEALTH FLAGS (Keeps ReCaptcha happy)
+    # STEALTH FLAGS (Critical for ReCaptcha)
     opts.add_argument("--disable-blink-features=AutomationControlled")
     opts.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36")
     opts.add_experimental_option("excludeSwitches", ["enable-automation"])
@@ -62,36 +62,36 @@ def setup_driver():
     driver.set_page_load_timeout(60)
     return driver
 
-# --- HELPER FUNCTIONS ---
-def fake_mouse_move(driver):
-    try:
-        action = ActionChains(driver)
-        for _ in range(2):
-            x = random.randint(-50, 50)
-            y = random.randint(-50, 50)
-            action.move_by_offset(x, y).perform()
-            time.sleep(0.2)
-            action.move_by_offset(-x, -y).perform()
-    except: pass
+# --- HELPER: EVENT STORM ---
+def trigger_events(driver, element):
+    """Fires multiple JS events to wake up the framework"""
+    driver.execute_script("""
+        arguments[0].dispatchEvent(new Event('input', { bubbles: true }));
+        arguments[0].dispatchEvent(new Event('change', { bubbles: true }));
+        arguments[0].dispatchEvent(new Event('blur', { bubbles: true }));
+        arguments[0].dispatchEvent(new Event('focus', { bubbles: true }));
+    """, element)
 
 def slow_type(driver, element, text):
     driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", element)
+    time.sleep(0.5)
     element.click()
     element.clear()
     for char in text:
         element.send_keys(char)
         time.sleep(random.uniform(0.05, 0.2))
+    trigger_events(driver, element)
     time.sleep(0.5)
 
 # --- LOGIN ---
 def perform_login(driver):
-    print("🔑 Detect Login Page. Starting BYPASS Login...", flush=True)
+    print("🔑 Detect Login Page. Starting TAB NAV Login...", flush=True)
     
     try:
         wait = WebDriverWait(driver, 20)
         
         # 1. Warm Up
-        fake_mouse_move(driver)
+        ActionChains(driver).move_by_offset(100, 100).perform()
         time.sleep(2)
         
         # 2. Find Inputs
@@ -114,40 +114,51 @@ def perform_login(driver):
         slow_type(driver, pass_in, LOGIN_PASSWORD)
         
         # 4. Wait for Security Check
-        print("   -> Waiting 8s for security verification...", flush=True)
+        print("   -> Waiting 8s for verification...", flush=True)
         time.sleep(8)
         
-        # 5. THE FORM BYPASS SUBMIT
-        print("   -> Force-Submitting the form (Bypassing Button)...", flush=True)
+        # 5. TAB NAVIGATION STRATEGY
+        print("   -> Attempting TAB Navigation to Button...", flush=True)
         
-        try:
-            # JavaScript: Find the form belonging to the password field and submit it
-            driver.execute_script("arguments[0].form.submit();", pass_in)
-            print("   -> Executed JS Submit.", flush=True)
-        except Exception as e:
-            print(f"   -> JS Submit failed: {e}. Trying button click...", flush=True)
-            try:
-                # Backup: Try clicking any button with 'LOGIN' text
-                driver.execute_script("""
-                    var buttons = document.getElementsByTagName('button');
-                    for (var i = 0; i < buttons.length; i++) {
-                        if (buttons[i].innerText.toUpperCase().includes('LOGIN')) {
-                            buttons[i].click();
-                            break;
-                        }
-                    }
-                """)
-            except: pass
+        # Focus Password field again
+        pass_in.click()
+        time.sleep(0.5)
+        
+        # Press TAB once (Should go to 'Remember Me' or 'Forgot Pass')
+        ActionChains(driver).send_keys(Keys.TAB).perform()
+        time.sleep(0.5)
+        
+        # Press TAB twice (Should land on Login Button)
+        ActionChains(driver).send_keys(Keys.TAB).perform()
+        time.sleep(0.5)
+        
+        # Press ENTER
+        print("   -> Pressing ENTER on current focus...", flush=True)
+        ActionChains(driver).send_keys(Keys.ENTER).perform()
 
         # 6. Wait for Redirect
         print("   -> Waiting for redirect...", flush=True)
         time.sleep(15)
         
         if "auth" in driver.current_url or "Sign" in driver.title:
+            print("⚠️ Tab failed. Trying 'Last Button' Strategy...", flush=True)
+            
+            # Backup: Find the last <button> on the page (usually the submit one)
+            try:
+                buttons = driver.find_elements(By.TAG_NAME, "button")
+                # Filter for visible buttons
+                visible_btns = [b for b in buttons if b.is_displayed()]
+                if visible_btns:
+                    target_btn = visible_btns[-1] # Click the last one
+                    print(f"   -> Clicking last visible button: {target_btn.text}", flush=True)
+                    driver.execute_script("arguments[0].click();", target_btn)
+                    time.sleep(10)
+            except: pass
+            
+        if "auth" in driver.current_url or "Sign" in driver.title:
             print("❌ Login Failed.", flush=True)
-            # Dump a small part of text to check for specific error messages
             body = driver.find_element(By.TAG_NAME, "body").text
-            print(f"DEBUG: {body[:200].replace(chr(10), ' ')}", flush=True)
+            print(f"DEBUG PAGE: {body[:200].replace(chr(10), ' ')}", flush=True)
             return False
             
         print("✅ Login Successful!", flush=True)
