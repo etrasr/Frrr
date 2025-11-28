@@ -14,7 +14,6 @@ CHAT_ID = os.environ.get("CHAT_ID")
 LOGIN_PHONE = os.environ.get("LOGIN_PHONE")
 LOGIN_PASSWORD = os.environ.get("LOGIN_PASSWORD")
 
-# We start at the Casino page. The site will redirect to Login if needed.
 GAME_URL = "https://flashsport.bet/en/casino?game=%2Fkeno1675&returnUrl=casino"
 
 def send_telegram(message):
@@ -32,7 +31,6 @@ def setup_driver():
     chrome_options.add_argument("--no-sandbox")
     chrome_options.add_argument("--disable-dev-shm-usage")
     chrome_options.add_argument("--window-size=1920,1080")
-    # Mobile User Agent (Matches your screenshot)
     chrome_options.add_argument("user-agent=Mozilla/5.0 (Linux; Android 10; SM-G981B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/80.0.3987.162 Mobile Safari/537.36")
     
     if os.environ.get("CHROME_BIN"):
@@ -48,7 +46,7 @@ def perform_login(driver):
         
         # 1. Enter Phone
         print("   - Typing phone...")
-        phone_input = wait.until(EC.element_to_be_clickable((By.XPATH, "//input[@type='tel' or contains(@name, 'phone') or contains(@placeholder, 'Phone')]")))
+        phone_input = wait.until(EC.element_to_be_clickable((By.XPATH, "//input[@type='tel' or contains(@name, 'phone') or contains(@placeholder, 'Phone') or contains(@placeholder, 'username')]")))
         phone_input.clear()
         phone_input.send_keys(LOGIN_PHONE)
         time.sleep(1)
@@ -60,35 +58,39 @@ def perform_login(driver):
         pass_input.send_keys(LOGIN_PASSWORD)
         time.sleep(1)
         
-        # 3. Find and Click LOGIN Button
-        print("   - looking for LOGIN button...")
+        # 3. CLICK THE BUTTON (The Shotgun Approach)
+        print("   - Attempting to find and click LOGIN button...")
         
-        # Strategy: Find the yellow button with text 'LOGIN'
-        try:
-            login_btn = driver.find_element(By.XPATH, "//button[contains(text(), 'LOGIN')]")
-            
-            # SCROLL TO BUTTON (Crucial for mobile view)
-            driver.execute_script("arguments[0].scrollIntoView(true);", login_btn)
-            time.sleep(1)
-            
-            # ATTEMPT 1: JavaScript Click (Best for hidden/overlay buttons)
-            print("   - Attempting JS Click...")
-            driver.execute_script("arguments[0].click();", login_btn)
-            
-            # Wait to see if URL changes
-            time.sleep(5)
-            
-            # ATTEMPT 2: If we are still on the login page, try pressing ENTER on the password field
-            if "auth" in driver.current_url or "Sign" in driver.title:
-                print("   - JS Click didn't redirect. Trying ENTER key...")
-                pass_input.send_keys(Keys.RETURN)
-                
-        except Exception as e:
-            print(f"   - Button click issue: {e}. Trying ENTER key fallback.")
+        clicked = False
+        
+        # List of XPaths to try, in order of likelihood
+        xpaths_to_try = [
+            "//button[contains(., 'LOGIN')]",          # Button containing 'LOGIN' (nested or not)
+            "//div[contains(., 'LOGIN') and @role='button']", # Div acting as button
+            "//*[text()='LOGIN']",                     # Any element with exact text 'LOGIN'
+            "//input[@type='submit']",                 # Standard submit button
+            "//button[contains(@class, 'login')]",     # Button with 'login' class
+        ]
+
+        for xpath in xpaths_to_try:
+            try:
+                btn = driver.find_element(By.XPATH, xpath)
+                # Scroll it into view
+                driver.execute_script("arguments[0].scrollIntoView(true);", btn)
+                time.sleep(0.5)
+                # Javascript Click
+                driver.execute_script("arguments[0].click();", btn)
+                print(f"     -> Clicked element found by: {xpath}")
+                clicked = True
+                break # Stop if we clicked something
+            except:
+                continue # Try next xpath
+        
+        if not clicked:
+            print("     -> Could not find button by text. Trying 'Enter' key on password...")
             pass_input.send_keys(Keys.RETURN)
-            
-        
-        # 4. Wait for Redirect (Longer wait)
+
+        # 4. Wait for Redirect
         print("   - Waiting 15s for redirect...")
         time.sleep(15)
         
@@ -96,20 +98,14 @@ def perform_login(driver):
         if "Sign" in driver.title or "auth" in driver.current_url:
             print("❌ STUCK ON LOGIN PAGE.")
             
-            # CAPTURE THE ERROR MESSAGE FROM SCREEN
-            body_text = driver.find_element(By.TAG_NAME, "body").text
-            
-            # Look for common error keywords
-            error_keywords = ["Invalid", "Incorrect", "match", "found", "required"]
-            found_error = "Unknown Error"
-            for line in body_text.split('\n'):
-                for key in error_keywords:
-                    if key in line:
-                        found_error = line
-                        break
-            
-            print(f"   - Screen says: {found_error}")
-            send_telegram(f"❌ Login Failed. Site says: {found_error}")
+            # Print HTML snippet to debug what the button actually looks like
+            try:
+                form_html = driver.find_element(By.TAG_NAME, "form").get_attribute('outerHTML')
+                print(f"DEBUG HTML: {form_html[:500]}...") 
+            except:
+                pass
+
+            send_telegram("❌ Login Failed. Bot could not click the button or credentials were wrong.")
             return False
             
         print(f"   - Success! New Title: {driver.title}")
@@ -145,7 +141,7 @@ def find_game_grid(driver):
 
 def detect_grid_logic(driver):
     try:
-        # Search for text '80' inside a container
+        # Search for text '80'
         potential_80s = driver.find_elements(By.XPATH, "//*[text()='80']")
         for el in potential_80s:
             class_name = el.get_attribute("class")
@@ -161,27 +157,24 @@ def detect_grid_logic(driver):
 
 def main():
     if not LOGIN_PHONE or not LOGIN_PASSWORD:
-        print("❌ Error: Missing credentials in Render Environment.")
+        print("❌ Error: Missing credentials.")
         return
 
     driver = setup_driver()
-    print("🚀 Bot Started (Deep Debug Mode)...")
+    print("🚀 Bot Started (Shotgun Login Mode)...")
     
     try:
         driver.get(GAME_URL)
         time.sleep(5)
-        print(f"📄 Initial Page: {driver.title}")
         
-        # LOGIN LOGIC
-        # We check URL or Title to see if we were redirected to login
+        # Check for Login Page
         if "Sign" in driver.title or "auth" in driver.current_url:
             success = perform_login(driver)
             if not success:
                 driver.quit()
                 return
             
-            # Force reload the game URL to ensure we leave the auth page
-            print("🔄 Force-loading Game URL...")
+            # Force reload game URL
             driver.get(GAME_URL)
             time.sleep(15)
 
@@ -189,7 +182,7 @@ def main():
         keno_class = find_game_grid(driver)
         
         if not keno_class:
-            send_telegram(f"❌ Login seemed okay, but still can't find numbers. I am at: {driver.title}")
+            send_telegram(f"❌ Login successful, but can't find numbers. Page: {driver.title}")
             return
 
         msg = f"✅ LOCKED ON! Tracking via class: '{keno_class}'"
@@ -203,7 +196,6 @@ def main():
             var changed_numbers = [];
             var elements = document.getElementsByClassName('{keno_class}');
             for (var i = 0; i < elements.length; i++) {{
-                // If class name is longer, it implies a color change modifier
                 if (elements[i].className.length > '{keno_class}'.length + 2) {{
                     changed_numbers.push(elements[i].innerText);
                 }}
