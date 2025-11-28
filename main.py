@@ -63,11 +63,15 @@ def setup_driver():
 def robust_type(driver, element, text):
     driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", element)
     time.sleep(0.5)
-    element.click()
-    element.clear()
+    try:
+        element.click()
+        element.clear()
+    except: pass
+    
     for char in text:
         element.send_keys(char)
         time.sleep(0.1)
+    
     # Force value update for React/Angular
     driver.execute_script("""
         arguments[0].dispatchEvent(new Event('input', { bubbles: true }));
@@ -78,7 +82,7 @@ def robust_type(driver, element, text):
 
 # --- LOGIN ---
 def perform_login(driver):
-    print("🔑 Detect Login Page. Starting SMART SELECTOR Login...", flush=True)
+    print("🔑 Detect Login Page. Starting STRICT LOGIN...", flush=True)
     
     try:
         wait = WebDriverWait(driver, 20)
@@ -96,20 +100,12 @@ def perform_login(driver):
         pass_in = visible[1]
         
         # 2. Type Credentials
-        print("   -> Typing Phone...", flush=True)
+        print("   -> Typing Credentials...", flush=True)
         robust_type(driver, phone_in, LOGIN_PHONE)
-        
-        print("   -> Typing Password...", flush=True)
         robust_type(driver, pass_in, LOGIN_PASSWORD)
         
-        # 3. INTERACT WITH CHECKBOX (Wakes up form)
-        try:
-            checkbox = driver.find_element(By.XPATH, "//input[@type='checkbox']")
-            driver.execute_script("arguments[0].click();", checkbox)
-        except: pass
-
-        # 4. SMART BUTTON FINDER (The Fix)
-        print("   -> Scanning for FORM Button (Ignoring Header)...", flush=True)
+        # 3. STRICT BUTTON FINDER
+        print("   -> Hunting for 'LOGIN' Button (Excluding Register)...", flush=True)
         
         target_btn = None
         
@@ -119,37 +115,41 @@ def perform_login(driver):
         for btn in buttons:
             if not btn.is_displayed(): continue
             
-            # Check Class Name
-            cls = btn.get_attribute("class") or ""
             txt = btn.text.upper()
+            cls = btn.get_attribute("class") or ""
             
-            # SKIP HEADER BUTTONS
-            if "header" in cls.lower() or "menu" in cls.lower():
-                print(f"      - Skipped Header Button: {cls}")
+            # --- THE FIX: STRICT EXCLUSIONS ---
+            if "REGISTER" in txt:
+                print(f"      - Skipped Register button: '{txt}'")
+                continue
+            if "SIGN UP" in txt:
+                print(f"      - Skipped Sign Up button: '{txt}'")
+                continue
+            if "RESTORE" in txt or "FORGOT" in txt:
+                continue
+            if "header" in cls.lower():
                 continue
                 
-            # LOOK FOR LOGIN KEYWORDS
-            if "LOG" in txt or "SIGN" in txt or btn.get_attribute("type") == "submit":
+            # MATCH ONLY LOGIN
+            if "LOG" in txt or "SIGN IN" in txt:
                 target_btn = btn
-                print(f"      + FOUND TARGET: Class='{cls}' | Text='{txt}'")
-                # We pick the first one that matches and IS NOT header
+                print(f"      + FOUND CORRECT BUTTON: '{txt}'")
                 break
         
-        # 5. CLICK
+        # 4. CLICK
         if target_btn:
             driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", target_btn)
             time.sleep(1)
-            
             print("   -> Clicking...", flush=True)
             try:
                 target_btn.click()
             except:
                 driver.execute_script("arguments[0].click();", target_btn)
         else:
-            print("⚠️ No valid button found. Using ENTER on Password.", flush=True)
+            print("⚠️ Button not found. Trying ENTER key.", flush=True)
             pass_in.send_keys(Keys.ENTER)
 
-        # 6. Wait for Redirect
+        # 5. Wait for Redirect
         print("   -> Waiting for redirect...", flush=True)
         time.sleep(15)
         
