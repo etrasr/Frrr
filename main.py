@@ -9,7 +9,6 @@ from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
-from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 
@@ -60,26 +59,16 @@ def setup_driver():
     driver.set_page_load_timeout(60)
     return driver
 
-# --- HELPER: TYPE & VERIFY ---
+# --- HELPER: ROBUST TYPE ---
 def robust_type(driver, element, text):
-    """Types text and checks if it stuck. If not, retries."""
     driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", element)
     time.sleep(0.5)
     element.click()
     element.clear()
-    
-    # Type char by char
     for char in text:
         element.send_keys(char)
         time.sleep(0.1)
-    
-    # Verify
-    value = element.get_attribute('value')
-    if value != text:
-        print(f"   ⚠️ Typing mismatch! Expected '{text}', got '{value}'. Forcing JS...", flush=True)
-        driver.execute_script("arguments[0].value = arguments[1];", element, text)
-        
-    # Trigger Events
+    # Force value update for React/Angular
     driver.execute_script("""
         arguments[0].dispatchEvent(new Event('input', { bubbles: true }));
         arguments[0].dispatchEvent(new Event('change', { bubbles: true }));
@@ -89,7 +78,7 @@ def robust_type(driver, element, text):
 
 # --- LOGIN ---
 def perform_login(driver):
-    print("🔑 Detect Login Page. Starting MOBILE VERIFIED Login...", flush=True)
+    print("🔑 Detect Login Page. Starting SMART SELECTOR Login...", flush=True)
     
     try:
         wait = WebDriverWait(driver, 20)
@@ -113,42 +102,51 @@ def perform_login(driver):
         print("   -> Typing Password...", flush=True)
         robust_type(driver, pass_in, LOGIN_PASSWORD)
         
-        # 3. INTERACT WITH 'REMEMBER ME' (Wakes up the form)
+        # 3. INTERACT WITH CHECKBOX (Wakes up form)
         try:
             checkbox = driver.find_element(By.XPATH, "//input[@type='checkbox']")
             driver.execute_script("arguments[0].click();", checkbox)
-            print("   -> Toggled checkbox to wake form.", flush=True)
-            time.sleep(1)
         except: pass
 
-        # 4. FIND BUTTON (By Type=Submit)
-        print("   -> Hunting for Submit Button...", flush=True)
+        # 4. SMART BUTTON FINDER (The Fix)
+        print("   -> Scanning for FORM Button (Ignoring Header)...", flush=True)
+        
         target_btn = None
         
-        try:
-            # First look for type='submit' (Most accurate)
-            target_btn = driver.find_element(By.XPATH, "//button[@type='submit']")
-            print("   -> Found Button via type='submit'", flush=True)
-        except:
-            # Fallback to text
-            xpath = "//button[contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'log')]"
-            btns = driver.find_elements(By.XPATH, xpath)
-            for b in btns:
-                if b.is_displayed(): target_btn = b; break
-
+        # Get all visible buttons
+        buttons = driver.find_elements(By.TAG_NAME, "button")
+        
+        for btn in buttons:
+            if not btn.is_displayed(): continue
+            
+            # Check Class Name
+            cls = btn.get_attribute("class") or ""
+            txt = btn.text.upper()
+            
+            # SKIP HEADER BUTTONS
+            if "header" in cls.lower() or "menu" in cls.lower():
+                print(f"      - Skipped Header Button: {cls}")
+                continue
+                
+            # LOOK FOR LOGIN KEYWORDS
+            if "LOG" in txt or "SIGN" in txt or btn.get_attribute("type") == "submit":
+                target_btn = btn
+                print(f"      + FOUND TARGET: Class='{cls}' | Text='{txt}'")
+                # We pick the first one that matches and IS NOT header
+                break
+        
         # 5. CLICK
         if target_btn:
-            # Check if disabled
-            cls = target_btn.get_attribute("class")
-            print(f"   -> Button Class: {cls}", flush=True)
-            
-            # Force Enable
-            driver.execute_script("arguments[0].removeAttribute('disabled');", target_btn)
+            driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", target_btn)
+            time.sleep(1)
             
             print("   -> Clicking...", flush=True)
-            driver.execute_script("arguments[0].click();", target_btn)
+            try:
+                target_btn.click()
+            except:
+                driver.execute_script("arguments[0].click();", target_btn)
         else:
-            print("   -> Button not found. Using Enter Key.", flush=True)
+            print("⚠️ No valid button found. Using ENTER on Password.", flush=True)
             pass_in.send_keys(Keys.ENTER)
 
         # 6. Wait for Redirect
