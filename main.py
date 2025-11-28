@@ -7,8 +7,6 @@ from flask import Flask
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
-from selenium.webdriver.common.keys import Keys
-from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 
@@ -36,53 +34,63 @@ def send_telegram(message):
                           data={"chat_id": CHAT_ID, "text": message})
         except: pass
 
-# --- BROWSER SETUP (CRASH PROOF MODE) ---
+# --- BROWSER SETUP (STABLE MOBILE MODE) ---
 def setup_driver():
-    print("   -> Launching Chrome (Manual Mobile Config)...", flush=True)
+    print("   -> Launching Chrome (Manual Config)...", flush=True)
     opts = Options()
     opts.add_argument("--headless") 
     opts.add_argument("--no-sandbox")
     opts.add_argument("--disable-dev-shm-usage")
     
-    # 1. DEFINE SIZE MANUALLY (Fixes 'Invalid Device' crash)
+    # 1. Size
     opts.add_argument("--window-size=393,851") 
     
-    # 2. DEFINE AGENT MANUALLY
+    # 2. User Agent
     mobile_ua = "Mozilla/5.0 (Linux; Android 11; Pixel 5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.91 Mobile Safari/537.36"
     opts.add_argument(f"user-agent={mobile_ua}")
     
-    # 3. MANUAL EMULATION DICTIONARY (Do NOT use 'deviceName')
+    # 3. Emulation (Manual Dictionary to prevent crashes)
     opts.add_experimental_option("mobileEmulation", {
         "deviceMetrics": { "width": 393, "height": 851, "pixelRatio": 3.0, "touch": True },
         "userAgent": mobile_ua
     })
     
-    # Enable Logging
     opts.set_capability('goog:loggingPrefs', {'browser': 'ALL'})
-    
     if os.environ.get("CHROME_BIN"): opts.binary_location = os.environ.get("CHROME_BIN")
     
     driver = webdriver.Chrome(options=opts)
     driver.set_page_load_timeout(90)
     return driver
 
-# --- HELPER: WAKE UP INPUT ---
-def wake_up_input(driver, element):
-    """Forces the website to realize text has been typed"""
+# --- THE INPUT HACK (CRITICAL FIX) ---
+def inject_value(driver, element, value):
+    """
+    Bypasses React/Angular validation by using the native browser setter.
+    This forces the website to accept the input.
+    """
     driver.execute_script("""
-        let el = arguments[0];
-        el.dispatchEvent(new Event('input', { bubbles: true }));
-        el.dispatchEvent(new Event('change', { bubbles: true }));
-        el.dispatchEvent(new Event('blur', { bubbles: true }));
-    """, element)
+        let input = arguments[0];
+        let text = arguments[1];
+        
+        // 1. Get the native setter from the browser prototype
+        let nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+        
+        // 2. Call it directly on the input (Bypassing React's listeners)
+        nativeInputValueSetter.call(input, text);
+        
+        // 3. Dispatch events to wake up the submit button
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+        input.dispatchEvent(new Event('blur', { bubbles: true }));
+    """, element, value)
 
 # --- LOGIN LOGIC ---
 def perform_login(driver):
-    print("🔑 Detect Login Page. Starting PATIENT Login...", flush=True)
+    print("🔑 Detect Login Page. Starting INJECTION Login...", flush=True)
     
     try:
         wait = WebDriverWait(driver, 30)
-        time.sleep(3)
+        time.sleep(5)
         
         # 1. Inputs
         wait.until(EC.presence_of_element_located((By.TAG_NAME, "input")))
@@ -96,68 +104,58 @@ def perform_login(driver):
         phone_in = visible[0]
         pass_in = visible[1]
         
-        # 2. Type Credentials
-        print("   -> Typing Credentials...", flush=True)
-        phone_in.click(); phone_in.clear(); phone_in.send_keys(LOGIN_PHONE)
-        time.sleep(0.5); wake_up_input(driver, phone_in)
-        # Blur phone
-        driver.find_element(By.TAG_NAME, "body").click()
+        # 2. INJECT Credentials
+        print("   -> Injecting Phone...", flush=True)
+        inject_value(driver, phone_in, LOGIN_PHONE)
+        time.sleep(1)
         
-        pass_in.click(); pass_in.clear(); pass_in.send_keys(LOGIN_PASSWORD)
-        time.sleep(0.5); wake_up_input(driver, pass_in)
-        # Blur password
-        driver.find_element(By.TAG_NAME, "body").click()
+        print("   -> Injecting Password...", flush=True)
+        inject_value(driver, pass_in, LOGIN_PASSWORD)
         time.sleep(1)
 
-        # 3. STRATEGY A: ENTER KEY + 30s WAIT
-        print("   -> Pressing ENTER...", flush=True)
-        pass_in.send_keys(Keys.RETURN)
-        
-        print("   -> ⏳ Waiting up to 30 seconds for login to finish...", flush=True)
-        # Check status every second for 30 seconds
-        for i in range(30):
-            # If URL changed or Title changed (no longer 'Sign in'), we are in!
-            if "auth" not in driver.current_url and "Sign" not in driver.title:
-                print(f"      ✅ Success! Redirected after {i+1} seconds.", flush=True)
-                return True
-            time.sleep(1)
-            
-        print("   -> ⚠️ Enter key timed out (30s). Trying Strategy B (Button Click)...", flush=True)
-
-        # 4. STRATEGY B: CLICK BUTTON + 30s WAIT
+        # 3. Find Button (By Text)
+        print("   -> Finding 'LOGIN' Button...", flush=True)
         btn = None
-        candidates = driver.find_elements(By.XPATH, "//button | //input[@type='submit']")
-        for c in candidates:
-            txt = c.text.strip().lower()
-            if "login" in txt or "sign" in txt:
-                btn = c
-                break
-        
+        try:
+            # Look for explicit LOGIN text
+            btn = driver.find_element(By.XPATH, "//button[contains(text(), 'LOGIN')]")
+        except:
+            # Fallback to submit type
+            try: btn = driver.find_element(By.XPATH, "//button[@type='submit']")
+            except: pass
+            
         if btn:
-            print(f"      -> Found button: {btn.text}", flush=True)
+            print(f"      -> Found: {btn.text}", flush=True)
             driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", btn)
             time.sleep(1)
-            try:
-                btn.click()
-            except:
-                driver.execute_script("arguments[0].click();", btn)
-            print("      -> Button Clicked.", flush=True)
             
-            # Wait another 30s
-            print("   -> ⏳ Waiting another 30s...", flush=True)
+            # CLICK
+            print("      -> Clicking Button...", flush=True)
+            driver.execute_script("arguments[0].click();", btn)
+            
+            # 4. WAIT 30 SECONDS (As requested)
+            print("   -> ⏳ Waiting 30 seconds for login to finish...", flush=True)
             for i in range(30):
                 if "auth" not in driver.current_url and "Sign" not in driver.title:
                     print(f"      ✅ Success! Redirected after {i+1} seconds.", flush=True)
                     return True
                 time.sleep(1)
-        else:
-            print("      -> No button found.", flush=True)
+                
+            print("   -> ⚠️ Button click timed out. Trying ENTER key...", flush=True)
+        
+        # 5. Backup: Enter Key
+        pass_in.send_keys(Keys.RETURN)
+        print("   -> Pressed ENTER. Waiting 30s...", flush=True)
+        time.sleep(30)
+        
+        # Final Check
+        if "auth" not in driver.current_url and "Sign" not in driver.title:
+            print("      ✅ Success! Redirected.", flush=True)
+            return True
 
-        # Final Failure Check
-        print("❌ Login Failed. Dumping HTML info...", flush=True)
+        print("❌ Login Failed.", flush=True)
         body = driver.find_element(By.TAG_NAME, "body").text
         if "Invalid" in body:
-            print("   -> Site says: Invalid Credentials", flush=True)
             send_telegram("❌ Login Failed: Invalid Credentials")
         return False
 
