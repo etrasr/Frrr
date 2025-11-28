@@ -7,7 +7,7 @@ from flask import Flask
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
-from selenium.webdriver.common.keys import Keys
+from selenium.webdriver.common.keys import Keys # Critical for Enter key
 from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
@@ -36,7 +36,7 @@ def send_telegram(message):
                           data={"chat_id": CHAT_ID, "text": message})
         except: pass
 
-# --- BROWSER SETUP ---
+# --- BROWSER SETUP (STABLE MOBILE) ---
 def setup_driver():
     print("   -> Launching Chrome (Pixel 5 Mode)...", flush=True)
     opts = Options()
@@ -54,47 +54,43 @@ def setup_driver():
     })
     
     opts.set_capability('goog:loggingPrefs', {'browser': 'ALL'})
+    
     if os.environ.get("CHROME_BIN"): opts.binary_location = os.environ.get("CHROME_BIN")
     
     driver = webdriver.Chrome(options=opts)
     driver.set_page_load_timeout(90)
     return driver
 
-# --- HYBRID FILL ---
-def hybrid_fill(driver, element, value):
+# --- THE INPUT HACK ---
+def inject_value(driver, element, value):
+    """Bypasses React validation"""
+    driver.execute_script("""
+        let input = arguments[0];
+        let text = arguments[1];
+        let setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+        setter.call(input, text);
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+        input.dispatchEvent(new Event('blur', { bubbles: true }));
+    """, element, value)
+
+# --- CLEANER ---
+def nuke_overlays(driver):
     try:
-        driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", element)
-        time.sleep(0.5)
-        element.click()
-        element.clear()
-        
-        # Physical typing
-        actions = ActionChains(driver)
-        actions.click(element)
-        for char in value:
-            actions.send_keys(char)
-            actions.pause(0.05)
-        actions.perform()
-        
-        # Logic Injection backup
         driver.execute_script("""
-            let input = arguments[0];
-            let text = arguments[1];
-            let setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
-            setter.call(input, text);
-            input.dispatchEvent(new Event('input', { bubbles: true }));
-            input.dispatchEvent(new Event('change', { bubbles: true }));
-        """, element, value)
-    except Exception as e:
-        print(f"   -> Warning during typing: {e}", flush=True)
+            document.querySelectorAll('iframe').forEach(e => e.remove());
+            document.querySelectorAll('div[class*="cookie"]').forEach(e => e.remove());
+        """)
+    except: pass
 
 # --- LOGIN LOGIC ---
 def perform_login(driver):
-    print("🔑 Detect Login Page. Starting STALE-PROOF Login...", flush=True)
+    print("🔑 Detect Login Page. Starting DEEP SEARCH Login...", flush=True)
     
     try:
         wait = WebDriverWait(driver, 30)
         time.sleep(5)
+        nuke_overlays(driver)
         
         # 1. Inputs
         wait.until(EC.presence_of_element_located((By.TAG_NAME, "input")))
@@ -108,62 +104,64 @@ def perform_login(driver):
         phone_in = visible[0]
         pass_in = visible[1]
         
-        # 2. Fill
-        print("   -> Filling Phone...", flush=True)
-        hybrid_fill(driver, phone_in, LOGIN_PHONE)
-        
-        print("   -> Filling Password...", flush=True)
-        hybrid_fill(driver, pass_in, LOGIN_PASSWORD)
-        
+        # 2. INJECT Credentials
+        print("   -> Injecting Credentials...", flush=True)
+        inject_value(driver, phone_in, LOGIN_PHONE)
+        time.sleep(0.5)
+        inject_value(driver, pass_in, LOGIN_PASSWORD)
         time.sleep(1)
 
-        # 3. ATTEMPT 1: PRESS ENTER
-        print("   -> Attempt 1: Pressing ENTER...", flush=True)
+        # 3. PRIORITY STRATEGY: ENTER KEY
+        print("   -> 1. Pressing ENTER Key...", flush=True)
         try:
             pass_in.send_keys(Keys.RETURN)
         except:
-            print("      (Enter key failed, element might be stale)", flush=True)
-
-        # 4. WAIT & CHECK (30s)
-        print("   -> ⏳ Waiting 30s for redirect...", flush=True)
+            print("      (Enter key error)", flush=True)
+        
+        # 4. WAIT 30 SECONDS (Strict Requirement)
+        print("   -> ⏳ Waiting 30 seconds for redirect...", flush=True)
         for i in range(30):
             if "auth" not in driver.current_url and "Sign" not in driver.title:
                 print(f"      ✅ Success! Redirected after {i+1} seconds.", flush=True)
                 return True
             time.sleep(1)
             
-        # 5. ATTEMPT 2: BUTTON CLICK (Only if Enter failed)
-        print("   -> ⚠️ Timeout. Attempt 2: Finding Button...", flush=True)
+        print("   -> ⚠️ Enter key timed out. Trying DEEP SEARCH BUTTON...", flush=True)
+        nuke_overlays(driver) # Clean again
         
-        # Re-find inputs/buttons because page might have refreshed
-        try:
-            btn = driver.find_element(By.XPATH, "//button[contains(text(), 'LOGIN')]")
-            print("      -> Found LOGIN button. Clicking...", flush=True)
-            driver.execute_script("arguments[0].click();", btn)
+        # 5. STRATEGY B: WILDCARD BUTTON SEARCH
+        # We look for ANY tag (*) that contains 'LOGIN' or is type 'submit'
+        targets = driver.find_elements(By.XPATH, "//*[contains(translate(text(), 'LOGIN', 'login'), 'login')] | //*[@type='submit']")
+        
+        valid_btn = None
+        for t in targets:
+            # Filter out hidden elements or script tags
+            if t.is_displayed() and t.tag_name not in ['script', 'style']:
+                print(f"      -> Candidate found: <{t.tag_name}> Text: '{t.text}'", flush=True)
+                valid_btn = t
+                # Prefer buttons over divs if multiple found
+                if t.tag_name == 'button':
+                    break
+        
+        if valid_btn:
+            print(f"      -> Clicking Best Candidate: <{valid_btn.tag_name}>", flush=True)
+            try:
+                driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", valid_btn)
+                time.sleep(0.5)
+                driver.execute_script("arguments[0].click();", valid_btn)
+            except Exception as e:
+                print(f"      -> Click Error: {e}", flush=True)
             
             # Wait another 15s
+            print("   -> ⏳ Waiting another 15s...", flush=True)
             for i in range(15):
                 if "auth" not in driver.current_url: return True
                 time.sleep(1)
-                
-        except Exception as e:
-            print(f"      -> Button click failed: {e}", flush=True)
+        else:
+            print("      -> ❌ No Login button found on page.", flush=True)
 
-        # 6. ATTEMPT 3: FORCE FORM SUBMIT (Last Resort)
-        print("   -> ⚠️ Button failed. Attempt 3: Force Submit...", flush=True)
-        try:
-            driver.execute_script("document.querySelector('form').submit();")
-            time.sleep(10)
-            if "auth" not in driver.current_url: return True
-        except: pass
-
-        # Final Failure
+        # Final Check
         print("❌ Login Failed.", flush=True)
-        try:
-            body = driver.find_element(By.TAG_NAME, "body").text
-            if "Invalid" in body:
-                send_telegram("❌ Login Failed: Invalid Credentials")
-        except: pass
         return False
 
     except Exception as e:
