@@ -4,11 +4,13 @@ import os
 import threading
 import sys
 import random
+import math
 from flask import Flask
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
+from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 
@@ -36,30 +38,52 @@ def send_telegram(message):
                           data={"chat_id": CHAT_ID, "text": message})
         except: pass
 
-# --- BROWSER SETUP (PURE MOBILE) ---
+# --- BROWSER SETUP (DESKTOP + STEALTH) ---
 def setup_driver():
-    print("   -> Launching Chrome (Nexus 5X Emulation)...", flush=True)
+    print("   -> Launching Chrome (Desktop Stealth)...", flush=True)
     opts = Options()
     opts.add_argument("--headless") 
     opts.add_argument("--no-sandbox")
     opts.add_argument("--disable-dev-shm-usage")
+    opts.add_argument("--window-size=1920,1080") # Full Desktop
     
-    # ENABLE MOBILE EMULATION (Tricks site 100%)
-    mobile_emulation = { "deviceName": "Nexus 5X" }
-    opts.add_experimental_option("mobileEmulation", mobile_emulation)
-    
-    # STEALTH
+    # STEALTH FLAGS (The most important part for ReCaptcha)
     opts.add_argument("--disable-blink-features=AutomationControlled")
+    opts.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36")
     opts.add_experimental_option("excludeSwitches", ["enable-automation"])
     opts.add_experimental_option("useAutomationExtension", False)
     
     if os.environ.get("CHROME_BIN"): opts.binary_location = os.environ.get("CHROME_BIN")
     
     driver = webdriver.Chrome(options=opts)
+    
+    # Patch navigator.webdriver to be undefined
+    driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
+        "source": "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
+    })
+    
     driver.set_page_load_timeout(60)
     return driver
 
-# --- SLOW TYPING ---
+# --- HUMAN SIMULATION ---
+def human_delay():
+    time.sleep(random.uniform(0.5, 1.5))
+
+def fake_mouse_move(driver):
+    """Moves the invisible mouse in curves to trick ReCaptcha"""
+    try:
+        action = ActionChains(driver)
+        # Move to random positions
+        for _ in range(3):
+            x_offset = random.randint(-200, 200)
+            y_offset = random.randint(-100, 100)
+            action.move_by_offset(x_offset, y_offset).perform()
+            time.sleep(random.uniform(0.1, 0.3))
+            # Move back slightly to prevent out of bounds
+            action.move_by_offset(-x_offset, -y_offset).perform()
+    except:
+        pass
+
 def slow_type(driver, element, text):
     driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", element)
     time.sleep(0.5)
@@ -67,17 +91,22 @@ def slow_type(driver, element, text):
     element.clear()
     for char in text:
         element.send_keys(char)
-        time.sleep(random.uniform(0.05, 0.15))
-    time.sleep(0.5)
+        time.sleep(random.uniform(0.05, 0.2)) # Random typing speed
+    human_delay()
 
 # --- LOGIN ---
 def perform_login(driver):
-    print("🔑 Detect Login Page. Starting MOBILE Login...", flush=True)
+    print("🔑 Detect Login Page. Starting HUMAN Login...", flush=True)
     
     try:
         wait = WebDriverWait(driver, 20)
         
-        # 1. Inputs
+        # 1. Warm Up (Move mouse)
+        print("   -> Warming up (Mouse Jiggle)...", flush=True)
+        fake_mouse_move(driver)
+        time.sleep(2)
+        
+        # 2. Find Inputs
         wait.until(EC.presence_of_element_located((By.TAG_NAME, "input")))
         inputs = driver.find_elements(By.TAG_NAME, "input")
         visible = [i for i in inputs if i.is_displayed()]
@@ -89,40 +118,30 @@ def perform_login(driver):
         phone_in = visible[0]
         pass_in = visible[1]
         
-        # 2. Type Credentials
-        print("   -> Typing Credentials...", flush=True)
+        # 3. Type Credentials
+        print("   -> Typing Phone...", flush=True)
         slow_type(driver, phone_in, LOGIN_PHONE)
-        time.sleep(0.5)
+        fake_mouse_move(driver) # Move mouse between inputs
+        
+        print("   -> Typing Password...", flush=True)
         slow_type(driver, pass_in, LOGIN_PASSWORD)
         
-        # 3. SUBMIT STRATEGY: ENTER KEY
-        print("   -> Pressing ENTER on password field (Keyboard Submit)...", flush=True)
-        pass_in.send_keys(Keys.ENTER)
-        
-        # 4. Wait to see if it worked
-        print("   -> Waiting 10s for redirect...", flush=True)
+        # 4. THE MAGIC WAIT (Let ReCaptcha verify us)
+        print("   -> Waiting 10s for ReCaptcha Token generation...", flush=True)
         time.sleep(10)
+        fake_mouse_move(driver)
         
-        # 5. Check if still on login page
+        # 5. Press ENTER (Most reliable method)
+        print("   -> Pressing ENTER...", flush=True)
+        pass_in.send_keys(Keys.RETURN)
+        
+        # 6. Wait for Redirect
+        print("   -> Waiting for redirect...", flush=True)
+        time.sleep(15)
+        
         if "auth" in driver.current_url or "Sign" in driver.title:
-            print("⚠️ Enter key didn't redirect. Trying Button Click...", flush=True)
-            
-            # Find the button specifically inside the form (Type Submit)
-            try:
-                btn = driver.find_element(By.XPATH, "//button[@type='submit']")
-                driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", btn)
-                time.sleep(1)
-                driver.execute_script("arguments[0].click();", btn)
-                print("   -> Clicked 'Submit' type button.", flush=True)
-                time.sleep(10)
-            except:
-                print("   -> Could not find submit button.", flush=True)
-                
-        # 6. Final Verify
-        if "auth" in driver.current_url or "Sign" in driver.title:
-            print("❌ Login Failed. Dumping Page Text:", flush=True)
+            print("❌ Login Failed. Dumping Text:", flush=True)
             body = driver.find_element(By.TAG_NAME, "body").text
-            # Print first 200 chars of text to see error
             print(f"DEBUG: {body[:300].replace(chr(10), ' ')}", flush=True)
             return False
             
