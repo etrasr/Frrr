@@ -38,15 +38,15 @@ def send_telegram(message):
 
 # --- BROWSER SETUP ---
 def setup_driver():
-    print("   -> Launching Surgical Chrome...", flush=True)
+    print("   -> Launching Reactor Chrome...", flush=True)
     opts = Options()
     opts.add_argument("--headless") 
     opts.add_argument("--no-sandbox")
     opts.add_argument("--disable-dev-shm-usage")
-    opts.add_argument("--window-size=375,812") # iPhone dimensions
+    opts.add_argument("--window-size=375,812") # Mobile View
     opts.add_argument("user-agent=Mozilla/5.0 (Linux; Android 10; SM-A205U) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/99.0.4844.88 Mobile Safari/537.36")
     
-    # Modern logging capability
+    # Enable Logging
     opts.set_capability('goog:loggingPrefs', {'browser': 'ALL'})
     
     if os.environ.get("CHROME_BIN"): opts.binary_location = os.environ.get("CHROME_BIN")
@@ -55,103 +55,112 @@ def setup_driver():
     driver.set_page_load_timeout(60)
     return driver
 
-# --- FORCE INPUT (BYPASS VALIDATION) ---
-def force_fill(driver, element, value):
+# --- THE REACT/ANGULAR HACK ---
+def react_force_fill(driver, element, value):
     """
-    Injects value directly into the HTML and triggers events.
-    This fixes issues where the 'Login' button stays grey/disabled.
+    This specific script forces React/Angular to acknowledge the input change.
+    Without this, the website thinks the box is empty even if text appears.
     """
     driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", element)
     time.sleep(0.5)
+    
+    # 1. Clear standard way
     element.clear()
-    element.send_keys(value) # Type physically
-    time.sleep(0.2)
-    # Inject logically
-    driver.execute_script(f"arguments[0].value = '{value}';", element)
-    # Wake up the website
-    driver.execute_script("arguments[0].dispatchEvent(new Event('input', { bubbles: true }));", element)
-    driver.execute_script("arguments[0].dispatchEvent(new Event('change', { bubbles: true }));", element)
-    driver.execute_script("arguments[0].dispatchEvent(new Event('blur', { bubbles: true }));", element)
+    
+    # 2. The React/Angular Hack Script
+    driver.execute_script("""
+        var element = arguments[0];
+        var value = arguments[1];
+        
+        // Set value
+        element.value = value;
+        
+        // Dispatch React-compatible events
+        var event = new Event('input', { bubbles: true });
+        var tracker = element._valueTracker;
+        if (tracker) {
+            tracker.setValue("old"); // Trick tracker into thinking value changed
+        }
+        element.dispatchEvent(event);
+        element.dispatchEvent(new Event('change', { bubbles: true }));
+        element.dispatchEvent(new Event('blur', { bubbles: true }));
+    """, element, value)
 
-# --- REMOVE DISTRACTIONS ---
+# --- REMOVE OVERLAYS ---
 def remove_overlays(driver):
-    """Deletes Chat widgets (tawk.to) and cookie banners"""
     print("   -> 🔪 Removing overlays/chat widgets...", flush=True)
     driver.execute_script("""
         var iframes = document.querySelectorAll('iframe');
-        iframes.forEach(f => f.remove()); // Remove all iframes (chat widgets)
-        var banners = document.querySelectorAll('div[class*="cookie"], div[class*="modal"]');
+        iframes.forEach(f => f.remove());
+        var banners = document.querySelectorAll('div[class*="cookie"], div[class*="modal"], div[class*="chat"]');
         banners.forEach(b => b.remove());
     """)
 
 # --- LOGIN LOGIC ---
 def perform_login(driver):
-    print("🔑 Detect Login Page. Starting SURGICAL Login...", flush=True)
+    print("🔑 Detect Login Page. Starting REACT Login...", flush=True)
     
     try:
         wait = WebDriverWait(driver, 20)
-        
-        # 1. Wait and Clean Page
         time.sleep(5)
         remove_overlays(driver)
         
-        # 2. Inputs
+        # 1. Inputs
         wait.until(EC.presence_of_element_located((By.TAG_NAME, "input")))
         inputs = driver.find_elements(By.TAG_NAME, "input")
         visible = [i for i in inputs if i.is_displayed()]
         
         if len(visible) < 2:
-            print("❌ Input Error: Not enough boxes found.", flush=True)
+            print("❌ Input Error.", flush=True)
             return False
             
         phone_in = visible[0]
         pass_in = visible[1]
         
-        # 3. Force Fill Credentials
-        print("   -> Injecting Credentials...", flush=True)
-        force_fill(driver, phone_in, LOGIN_PHONE)
+        # 2. Fill Credentials using THE HACK
+        print("   -> Injecting Credentials (React Mode)...", flush=True)
+        react_force_fill(driver, phone_in, LOGIN_PHONE)
         time.sleep(0.5)
-        force_fill(driver, pass_in, LOGIN_PASSWORD)
+        react_force_fill(driver, pass_in, LOGIN_PASSWORD)
         time.sleep(1)
         
-        # 4. FIND BUTTON (Specific Strategy)
+        # 3. Find Button
         print("   -> Targeting Button...", flush=True)
-        
-        # Try to find the button
         btn = None
         try:
-            # Look for ANY button with "log" in text (insensitive)
+            # Look for button by Text
             btn = driver.find_element(By.XPATH, "//button[contains(translate(text(), 'LOGIN', 'login'), 'login')]")
-            print("      (Found button by Text)", flush=True)
+            print("      (Found by Text)", flush=True)
         except:
             try:
-                # Look for submit type
+                # Look for button by Type
                 btn = driver.find_element(By.XPATH, "//button[@type='submit']")
-                print("      (Found button by Type)", flush=True)
+                print("      (Found by Type)", flush=True)
             except: pass
             
-        # 5. CLICK
+        # 4. CLICK STRATEGY
         if btn:
-            # Force enable just in case
+            # Force Enable
             driver.execute_script("arguments[0].removeAttribute('disabled');", btn)
-            
-            # JS Click (Bypasses anything covering the button)
+            # JS Click
             print("   -> Executing JS Click...", flush=True)
             driver.execute_script("arguments[0].click();", btn)
+            
+            # Backup: Submit Form Programmatically
+            try:
+                print("   -> Backup: Executing Form Submit...", flush=True)
+                driver.execute_script("arguments[0].form.submit();", btn)
+            except: pass
         else:
             print("   -> Button missing. Pressing Enter...", flush=True)
             pass_in.send_keys(Keys.RETURN)
 
-        # 6. Verify
+        # 5. Verify
         print("   -> Waiting for redirect...", flush=True)
         time.sleep(15)
         
         if "auth" in driver.current_url or "Sign" in driver.title:
             print("❌ Login Failed. Page didn't change.", flush=True)
-            # Debug text
-            body = driver.find_element(By.TAG_NAME, "body").text
-            if "Invalid" in body:
-                print("   -> Site says: Invalid Credentials", flush=True)
             return False
             
         print("✅ Login Successful!", flush=True)
