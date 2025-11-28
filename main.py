@@ -12,17 +12,15 @@ from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 
-# --- FORCE LOGS ---
-sys.stdout.reconfigure(line_buffering=True)
-
 # --- CONFIGURATION ---
+sys.stdout.reconfigure(line_buffering=True) # Force logs to show instantly
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 CHAT_ID = os.environ.get("CHAT_ID")
 LOGIN_PHONE = os.environ.get("LOGIN_PHONE")
 LOGIN_PASSWORD = os.environ.get("LOGIN_PASSWORD")
 GAME_URL = "https://flashsport.bet/en/casino?game=%2Fkeno1675&returnUrl=casino"
 
-# --- SERVER (Keep Render Alive) ---
+# --- SERVER ---
 app = Flask(__name__)
 @app.route('/')
 def home(): return "Bot Running"
@@ -47,81 +45,120 @@ def setup_driver():
     opts.add_argument("--disable-dev-shm-usage")
     opts.add_argument("--disable-gpu")
     opts.add_argument("--window-size=1366,768")
-    # Matches your mobile screenshot user agent
-    opts.add_argument("user-agent=Mozilla/5.0 (Linux; Android 11; SM-G991B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/89.0.4389.105 Mobile Safari/537.36")
+    # Mobile User Agent
+    opts.add_argument("user-agent=Mozilla/5.0 (Linux; Android 10; SM-A205U) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/99.0.4844.88 Mobile Safari/537.36")
     
     if os.environ.get("CHROME_BIN"): opts.binary_location = os.environ.get("CHROME_BIN")
     
     driver = webdriver.Chrome(options=opts)
-    driver.set_page_load_timeout(90)
+    driver.set_page_load_timeout(60)
     return driver
 
-# --- HUMAN TYPING ---
-def human_type(driver, element, text):
-    """Clicks element and types text like a human to trigger site validation"""
-    try:
-        driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", element)
-        time.sleep(0.5)
-        element.click()
-        element.clear()
-        time.sleep(0.2)
-        element.send_keys(text)
-        time.sleep(0.5)
-        # Trigger blur to ensure validation happens
-        driver.execute_script("arguments[0].dispatchEvent(new Event('blur', { bubbles: true }));", element)
-        return True
-    except Exception as e:
-        print(f"⚠️ Typing error: {e}", flush=True)
-        return False
+# --- SLOW TYPING ENGINE ---
+def slow_type(driver, element, text):
+    """Types text one char at a time to trigger validation scripts"""
+    driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", element)
+    element.click()
+    element.clear()
+    time.sleep(0.5)
+    
+    for char in text:
+        element.send_keys(char)
+        time.sleep(0.1) # Wait 0.1s between keys (Like a human)
+    
+    time.sleep(0.5)
+    # The "Shake" maneuver: Type space then backspace to wake up the field
+    element.send_keys(Keys.SPACE)
+    time.sleep(0.1)
+    element.send_keys(Keys.BACKSPACE)
+    
+    # Trigger events manually just in case
+    driver.execute_script("""
+        arguments[0].dispatchEvent(new Event('input', { bubbles: true }));
+        arguments[0].dispatchEvent(new Event('change', { bubbles: true }));
+        arguments[0].dispatchEvent(new Event('blur', { bubbles: true }));
+    """, element)
 
 # --- LOGIN LOGIC ---
 def perform_login(driver):
-    print("🔑 Detect Login Page. Starting Human Login...", flush=True)
+    print("🔑 Detect Login Page. Starting SLOW LOGIN...", flush=True)
     
     try:
         wait = WebDriverWait(driver, 20)
         
-        # 1. Identify Inputs by Placeholder/Type (More accurate)
-        print("   -> Finding inputs...", flush=True)
+        # 1. Find Inputs
+        print("   -> Locating inputs...", flush=True)
+        # Look for the phone input (first input usually)
+        wait.until(EC.presence_of_element_located((By.TAG_NAME, "input")))
+        inputs = driver.find_elements(By.TAG_NAME, "input")
+        visible_inputs = [i for i in inputs if i.is_displayed()]
         
-        # Phone Input (Looking for 'Phone' in placeholder)
-        phone_input = wait.until(EC.presence_of_element_located((By.XPATH, "//input[contains(@placeholder, 'Phone') or contains(@placeholder, 'username')]")))
+        if len(visible_inputs) < 2:
+            print("❌ Error: Could not find 2 visible inputs.", flush=True)
+            return False
+            
+        phone_input = visible_inputs[0]
+        # Try to find password specific input, otherwise take the second one
+        pass_input = visible_inputs[1]
+        for inp in visible_inputs:
+            if inp.get_attribute("type") == "password":
+                pass_input = inp
+                break
         
-        # Password Input
-        pass_input = driver.find_element(By.XPATH, "//input[@type='password']")
-        
-        # 2. Type Credentials
-        print("   -> Typing Phone...", flush=True)
-        human_type(driver, phone_input, LOGIN_PHONE)
+        # 2. Type Credentials (SLOWLY)
+        print(f"   -> Typing Phone ({LOGIN_PHONE})...", flush=True)
+        slow_type(driver, phone_input, LOGIN_PHONE)
         
         print("   -> Typing Password...", flush=True)
-        human_type(driver, pass_input, LOGIN_PASSWORD)
+        slow_type(driver, pass_input, LOGIN_PASSWORD)
         
-        # 3. Click The BIG LOGIN Button
-        print("   -> Clicking Login Button...", flush=True)
+        # 3. Handle Login Button
+        print("   -> Hunting for Login Button...", flush=True)
+        time.sleep(1)
         
-        # We look for the button specifically inside the form area, not the header
-        # The XPath below looks for a button with text 'LOGIN' that comes AFTER the password field
+        # Try to find the button
+        login_btn = None
         try:
-            # Try pressing ENTER on the password field first (Most reliable)
-            pass_input.send_keys(Keys.RETURN)
-            print("      (Pressed ENTER key)", flush=True)
+            # Look for button with text 'LOGIN'
+            login_btn = driver.find_element(By.XPATH, "//button[contains(text(), 'LOGIN')]")
         except:
-            # Fallback to clicking the submit button
-            submit_btn = driver.find_element(By.XPATH, "//button[@type='submit']")
-            driver.execute_script("arguments[0].click();", submit_btn)
-            print("      (Clicked Submit button)", flush=True)
+            try:
+                # Look for submit button
+                login_btn = driver.find_element(By.XPATH, "//button[@type='submit']")
+            except:
+                print("⚠️ Could not find button element. Will try Enter key.", flush=True)
+
+        # 4. FORCE ENABLE & CLICK
+        if login_btn:
+            # Debug: Print button status
+            btn_html = login_btn.get_attribute('outerHTML')
+            print(f"   -> Button found: {btn_html[:100]}...", flush=True)
+            
+            # HACK: Force remove 'disabled' attribute if it exists
+            driver.execute_script("arguments[0].removeAttribute('disabled');", login_btn)
+            driver.execute_script("arguments[0].classList.remove('disabled');", login_btn)
+            time.sleep(0.5)
+            
+            print("   -> Clicking Button via JS...", flush=True)
+            driver.execute_script("arguments[0].click();", login_btn)
+        else:
+            print("   -> Pressing ENTER on password field...", flush=True)
+            pass_input.send_keys(Keys.RETURN)
             
         time.sleep(15)
         
-        # 4. Verify
+        # 5. Verify
         if "auth" in driver.current_url or "Sign" in driver.title:
             print("❌ Login Failed. Still on login page.", flush=True)
-            body = driver.find_element(By.TAG_NAME, "body").text
-            if "Invalid" in body or "Incorrect" in body:
-                send_telegram("❌ Login Failed: Website says Invalid Phone/Password.")
+            
+            # DEBUG: Print the page text to see the error
+            body_text = driver.find_element(By.TAG_NAME, "body").text
+            if "Invalid" in body_text:
+                send_telegram("❌ Login Failed: Site says 'Invalid Username/Password'")
             else:
-                send_telegram("❌ Login Failed: Unknown reason (Button might be disabled).")
+                # If no error text, maybe the button didn't work.
+                print(f"DEBUG PAGE TEXT: {body_text[:200]}")
+                send_telegram("❌ Login Failed: Unknown reason. Check logs.")
             return False
             
         print("✅ Login Successful!", flush=True)
