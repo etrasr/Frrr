@@ -36,115 +36,122 @@ def send_telegram(message):
                           data={"chat_id": CHAT_ID, "text": message})
         except: pass
 
-# --- BROWSER SETUP (FIXED) ---
+# --- BROWSER SETUP ---
 def setup_driver():
-    print("   -> Launching Ultimate Chrome...", flush=True)
+    print("   -> Launching Surgical Chrome...", flush=True)
     opts = Options()
     opts.add_argument("--headless") 
     opts.add_argument("--no-sandbox")
     opts.add_argument("--disable-dev-shm-usage")
-    opts.add_argument("--window-size=375,812") # Mobile View
+    opts.add_argument("--window-size=375,812") # iPhone dimensions
     opts.add_argument("user-agent=Mozilla/5.0 (Linux; Android 10; SM-A205U) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/99.0.4844.88 Mobile Safari/537.36")
     
-    # ENABLE LOGGING (New Method for Selenium 4)
+    # Modern logging capability
     opts.set_capability('goog:loggingPrefs', {'browser': 'ALL'})
     
     if os.environ.get("CHROME_BIN"): opts.binary_location = os.environ.get("CHROME_BIN")
     
-    # REMOVE 'desired_capabilities' argument (This caused your crash)
     driver = webdriver.Chrome(options=opts)
     driver.set_page_load_timeout(60)
     return driver
 
-# --- HELPER: DUMP ERROR LOGS ---
-def dump_console_logs(driver):
-    print("   -> 🛑 DUMPING BROWSER LOGS:", flush=True)
-    try:
-        logs = driver.get_log('browser')
-        for log in logs:
-            if log['level'] == 'SEVERE':
-                print(f"      ❌ JS ERROR: {log['message']}", flush=True)
-    except:
-        pass
+# --- FORCE INPUT (BYPASS VALIDATION) ---
+def force_fill(driver, element, value):
+    """
+    Injects value directly into the HTML and triggers events.
+    This fixes issues where the 'Login' button stays grey/disabled.
+    """
+    driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", element)
+    time.sleep(0.5)
+    element.clear()
+    element.send_keys(value) # Type physically
+    time.sleep(0.2)
+    # Inject logically
+    driver.execute_script(f"arguments[0].value = '{value}';", element)
+    # Wake up the website
+    driver.execute_script("arguments[0].dispatchEvent(new Event('input', { bubbles: true }));", element)
+    driver.execute_script("arguments[0].dispatchEvent(new Event('change', { bubbles: true }));", element)
+    driver.execute_script("arguments[0].dispatchEvent(new Event('blur', { bubbles: true }));", element)
+
+# --- REMOVE DISTRACTIONS ---
+def remove_overlays(driver):
+    """Deletes Chat widgets (tawk.to) and cookie banners"""
+    print("   -> 🔪 Removing overlays/chat widgets...", flush=True)
+    driver.execute_script("""
+        var iframes = document.querySelectorAll('iframe');
+        iframes.forEach(f => f.remove()); // Remove all iframes (chat widgets)
+        var banners = document.querySelectorAll('div[class*="cookie"], div[class*="modal"]');
+        banners.forEach(b => b.remove());
+    """)
 
 # --- LOGIN LOGIC ---
 def perform_login(driver):
-    print("🔑 Detect Login Page. Starting Login...", flush=True)
+    print("🔑 Detect Login Page. Starting SURGICAL Login...", flush=True)
     
     try:
         wait = WebDriverWait(driver, 20)
         
-        # 1. Clear Cookies/Banners
-        try:
-            cookie_btn = driver.find_element(By.XPATH, "//button[contains(text(), 'Accept') or contains(text(), 'OK')]")
-            driver.execute_script("arguments[0].click();", cookie_btn)
-        except: pass
-
+        # 1. Wait and Clean Page
+        time.sleep(5)
+        remove_overlays(driver)
+        
         # 2. Inputs
         wait.until(EC.presence_of_element_located((By.TAG_NAME, "input")))
         inputs = driver.find_elements(By.TAG_NAME, "input")
         visible = [i for i in inputs if i.is_displayed()]
         
         if len(visible) < 2:
-            print("❌ Input Error.", flush=True)
+            print("❌ Input Error: Not enough boxes found.", flush=True)
             return False
             
         phone_in = visible[0]
         pass_in = visible[1]
         
-        # 3. Type Credentials
-        print("   -> Typing Credentials...", flush=True)
-        phone_in.clear()
-        for char in LOGIN_PHONE:
-            phone_in.send_keys(char)
-            time.sleep(0.05)
-        
+        # 3. Force Fill Credentials
+        print("   -> Injecting Credentials...", flush=True)
+        force_fill(driver, phone_in, LOGIN_PHONE)
         time.sleep(0.5)
-        
-        pass_in.clear()
-        for char in LOGIN_PASSWORD:
-            pass_in.send_keys(char)
-            time.sleep(0.05)
-            
+        force_fill(driver, pass_in, LOGIN_PASSWORD)
         time.sleep(1)
-
-        # 4. TRIPLE TAP STRATEGY
-        print("   -> Executing Triple Tap Strategy...", flush=True)
         
-        # A. Find Button
+        # 4. FIND BUTTON (Specific Strategy)
+        print("   -> Targeting Button...", flush=True)
+        
+        # Try to find the button
         btn = None
         try:
-            btn = driver.find_element(By.XPATH, "//button[@type='submit']")
+            # Look for ANY button with "log" in text (insensitive)
+            btn = driver.find_element(By.XPATH, "//button[contains(translate(text(), 'LOGIN', 'login'), 'login')]")
+            print("      (Found button by Text)", flush=True)
         except:
             try:
-                btn = driver.find_element(By.XPATH, "//button[contains(text(), 'LOGIN')]")
+                # Look for submit type
+                btn = driver.find_element(By.XPATH, "//button[@type='submit']")
+                print("      (Found button by Type)", flush=True)
             except: pass
             
-        # B. Click
+        # 5. CLICK
         if btn:
-            try:
-                driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", btn)
-                time.sleep(0.5)
-                driver.execute_script("arguments[0].click();", btn)
-                print("      -> Clicked Button.", flush=True)
-            except: pass
+            # Force enable just in case
+            driver.execute_script("arguments[0].removeAttribute('disabled');", btn)
             
-        # C. Enter Key
-        time.sleep(1)
-        print("      -> Pressing ENTER key...", flush=True)
-        pass_in.send_keys(Keys.RETURN)
-        
-        # 5. Wait for Redirect
-        print("   -> Waiting for result...", flush=True)
+            # JS Click (Bypasses anything covering the button)
+            print("   -> Executing JS Click...", flush=True)
+            driver.execute_script("arguments[0].click();", btn)
+        else:
+            print("   -> Button missing. Pressing Enter...", flush=True)
+            pass_in.send_keys(Keys.RETURN)
+
+        # 6. Verify
+        print("   -> Waiting for redirect...", flush=True)
         time.sleep(15)
         
         if "auth" in driver.current_url or "Sign" in driver.title:
-            print("❌ Login Failed. Dumping info...", flush=True)
+            print("❌ Login Failed. Page didn't change.", flush=True)
+            # Debug text
             body = driver.find_element(By.TAG_NAME, "body").text
             if "Invalid" in body:
-                print("   -> Site says: Invalid Username/Password", flush=True)
-            else:
-                dump_console_logs(driver)
+                print("   -> Site says: Invalid Credentials", flush=True)
             return False
             
         print("✅ Login Successful!", flush=True)
