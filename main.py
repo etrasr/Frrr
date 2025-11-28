@@ -36,74 +36,40 @@ def send_telegram(message):
                           data={"chat_id": CHAT_ID, "text": message})
         except: pass
 
-# --- BROWSER SETUP (MOBILE MODE) ---
+# --- BROWSER SETUP ---
 def setup_driver():
-    print("   -> Launching Mobile Chrome...", flush=True)
+    print("   -> Launching Chrome...", flush=True)
     opts = Options()
     opts.add_argument("--headless") 
     opts.add_argument("--no-sandbox")
     opts.add_argument("--disable-dev-shm-usage")
-    
-    # Back to Mobile View (Matches your screenshot)
-    opts.add_argument("--window-size=375,812")
+    opts.add_argument("--window-size=375,812") # Mobile View
     opts.add_argument("user-agent=Mozilla/5.0 (Linux; Android 10; SM-A205U) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/99.0.4844.88 Mobile Safari/537.36")
-    
     opts.set_capability('goog:loggingPrefs', {'browser': 'ALL'})
+    
     if os.environ.get("CHROME_BIN"): opts.binary_location = os.environ.get("CHROME_BIN")
     
     driver = webdriver.Chrome(options=opts)
     driver.set_page_load_timeout(60)
     return driver
 
-# --- HELPER: BRUTE FORCE CLICKER ---
-def find_and_click_login_button(driver):
-    print("   -> 🕵️ BRUTE FORCE SEARCH: Looking for ANY login button...", flush=True)
-    
-    # Get ALL clickable elements
-    elements = driver.find_elements(By.XPATH, "//button | //a | //div[@role='button'] | //input[@type='submit']")
-    
-    clicked = False
-    for el in elements:
-        try:
-            # Get text and clean it
-            txt = el.text.strip().lower()
-            val = el.get_attribute("value")
-            if val: txt += " " + val.lower()
-            
-            # Check if it looks like a login button
-            if "login" in txt or "sign in" in txt or "log in" in txt:
-                # Ignore the 'Register' button or Header links if possible, try to prioritize submit
-                print(f"      -> Found candidate: '{el.text}' (Tag: {el.tag_name})", flush=True)
-                
-                driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", el)
-                time.sleep(0.5)
-                
-                # Attempt Click
-                try:
-                    el.click()
-                except:
-                    driver.execute_script("arguments[0].click();", el)
-                
-                print("      -> CLICKED!", flush=True)
-                clicked = True
-                break # Stop after clicking the first valid one
-        except:
-            continue
-            
-    if not clicked:
-        print("      -> ❌ No button text matched. Trying generic Submit...", flush=True)
-        try:
-            btn = driver.find_element(By.XPATH, "//button[@type='submit']")
-            driver.execute_script("arguments[0].click();", btn)
-            print("      -> Clicked type='submit'", flush=True)
-            clicked = True
-        except: pass
-        
-    return clicked
+# --- FORCE THE WEBSITE TO WAKE UP ---
+def wake_up_input(driver, element):
+    """
+    This forces Angular/React/Vue to realize the input has text.
+    It fires every possible event that a human keyboard would fire.
+    """
+    driver.execute_script("""
+        let el = arguments[0];
+        let evts = ['input', 'change', 'keydown', 'keypress', 'keyup', 'blur', 'focus'];
+        evts.forEach(e => {
+            el.dispatchEvent(new Event(e, { bubbles: true }));
+        });
+    """, element)
 
 # --- LOGIN LOGIC ---
 def perform_login(driver):
-    print("🔑 Detect Login Page. Starting BRUTE FORCE Login...", flush=True)
+    print("🔑 Detect Login Page. Starting FORCED EVENT Login...", flush=True)
     
     try:
         wait = WebDriverWait(driver, 20)
@@ -124,25 +90,59 @@ def perform_login(driver):
         phone_in = visible[0]
         pass_in = visible[1]
         
-        # 3. Type Credentials (HARDWARE MODE)
+        # 3. Type Credentials + WAKE UP EVENTS
         print("   -> Typing Credentials...", flush=True)
-        actions = ActionChains(driver)
         
         # Phone
         phone_in.click()
         phone_in.clear()
-        actions.click(phone_in).send_keys(LOGIN_PHONE).perform()
+        phone_in.send_keys(LOGIN_PHONE)
         time.sleep(0.5)
+        wake_up_input(driver, phone_in) # <--- FORCE UPDATE
         
         # Password
         pass_in.click()
         pass_in.clear()
-        actions.click(pass_in).send_keys(LOGIN_PASSWORD).perform()
-        time.sleep(1)
+        pass_in.send_keys(LOGIN_PASSWORD)
+        time.sleep(0.5)
+        wake_up_input(driver, pass_in) # <--- FORCE UPDATE
         
+        time.sleep(1)
+
         # 4. CLICK THE BUTTON
-        if not find_and_click_login_button(driver):
-            print("   -> ⚠️ Could not click button. Pressing ENTER...", flush=True)
+        print("   -> Finding Button...", flush=True)
+        
+        # Try finding ANY button that looks like login
+        buttons = driver.find_elements(By.XPATH, "//button | //input[@type='submit']")
+        target_btn = None
+        
+        for btn in buttons:
+            txt = btn.text.strip().lower()
+            if "login" in txt or "sign" in txt:
+                target_btn = btn
+                break
+        
+        if not target_btn:
+            # Fallback to type=submit
+            try: target_btn = driver.find_element(By.XPATH, "//button[@type='submit']")
+            except: pass
+            
+        if target_btn:
+            print(f"      -> Click target found: '{target_btn.text}'", flush=True)
+            # Force Enable
+            driver.execute_script("arguments[0].removeAttribute('disabled');", target_btn)
+            
+            # ActionChain Click (Physical)
+            try:
+                actions = ActionChains(driver)
+                actions.move_to_element(target_btn).click().perform()
+                print("      -> ActionClick performed.", flush=True)
+            except:
+                # JS Click (Backup)
+                driver.execute_script("arguments[0].click();", target_btn)
+                print("      -> JS Click performed.", flush=True)
+        else:
+            print("   -> Button missing. Pressing Enter...", flush=True)
             pass_in.send_keys(Keys.RETURN)
 
         # 5. Verify
@@ -150,7 +150,7 @@ def perform_login(driver):
         time.sleep(15)
         
         if "auth" in driver.current_url or "Sign" in driver.title:
-            print("❌ Login Failed. Page didn't change.", flush=True)
+            print("❌ Login Failed. Dumping HTML...", flush=True)
             body = driver.find_element(By.TAG_NAME, "body").text
             if "Invalid" in body:
                 print("   -> ERROR: Invalid Credentials", flush=True)
