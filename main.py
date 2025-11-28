@@ -36,34 +36,30 @@ def send_telegram(message):
                           data={"chat_id": CHAT_ID, "text": message})
         except: pass
 
-# --- STEALTH BROWSER SETUP ---
+# --- BROWSER SETUP (DESKTOP MODE) ---
 def setup_driver():
-    print("   -> Launching Stealth Chrome...", flush=True)
+    print("   -> Launching Chrome (Desktop Mode)...", flush=True)
     opts = Options()
     opts.add_argument("--headless") 
     opts.add_argument("--no-sandbox")
     opts.add_argument("--disable-dev-shm-usage")
-    opts.add_argument("--window-size=375,812") # iPhone X dimensions
+    opts.add_argument("--window-size=1920,1080") # Full HD Desktop
     
-    # HIDE SELENIUM TRACES
+    # STEALTH FLAGS
     opts.add_argument("--disable-blink-features=AutomationControlled")
     opts.add_experimental_option("excludeSwitches", ["enable-automation"])
     opts.add_experimental_option("useAutomationExtension", False)
     
-    # MOBILE USER AGENT
-    opts.add_argument("user-agent=Mozilla/5.0 (Linux; Android 11; SM-G991B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/99.0.4844.88 Mobile Safari/537.36")
+    # DESKTOP USER AGENT (High Trust)
+    opts.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36")
     
     if os.environ.get("CHROME_BIN"): opts.binary_location = os.environ.get("CHROME_BIN")
     
     driver = webdriver.Chrome(options=opts)
     
-    # ADVANCED STEALTH: Overwrite the 'navigator.webdriver' property
+    # REMOVE WEBDRIVER TRACES
     driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
-        "source": """
-            Object.defineProperty(navigator, 'webdriver', {
-                get: () => undefined
-            });
-        """
+        "source": "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
     })
     
     driver.set_page_load_timeout(60)
@@ -75,26 +71,23 @@ def slow_type(driver, element, text):
     time.sleep(0.5)
     element.click()
     element.clear()
-    
     for char in text:
         element.send_keys(char)
-        time.sleep(random.uniform(0.05, 0.2)) # Random typing speed
-        
+        time.sleep(random.uniform(0.1, 0.3)) # Slower typing
     time.sleep(0.5)
-    # The "Shake" to wake up ReCaptcha
-    element.send_keys(Keys.SPACE)
-    time.sleep(0.1)
-    element.send_keys(Keys.BACKSPACE)
 
 # --- LOGIN ---
 def perform_login(driver):
-    print("🔑 Detect Login Page. Starting STEALTH Login...", flush=True)
+    print("🔑 Detect Login Page. Starting DESKTOP Login...", flush=True)
     
     try:
         wait = WebDriverWait(driver, 20)
         
-        # 1. Inputs
-        print("   -> Locating inputs...", flush=True)
+        # 1. Wait for page to settle (Crucial for ReCaptcha)
+        print("   -> Waiting 5s for security checks...", flush=True)
+        time.sleep(5)
+        
+        # 2. Find Inputs
         wait.until(EC.presence_of_element_located((By.TAG_NAME, "input")))
         inputs = driver.find_elements(By.TAG_NAME, "input")
         visible = [i for i in inputs if i.is_displayed()]
@@ -106,55 +99,39 @@ def perform_login(driver):
         phone_in = visible[0]
         pass_in = visible[1]
         
-        # 2. Type Credentials
+        # 3. Type Credentials
         print("   -> Typing Credentials...", flush=True)
         slow_type(driver, phone_in, LOGIN_PHONE)
         time.sleep(1)
         slow_type(driver, pass_in, LOGIN_PASSWORD)
-        time.sleep(1)
         
-        # 3. Find Button (Aggressive Search)
+        # 4. THE FIX: WAIT FOR TOKEN
+        # We must wait for the ReCaptcha script to verify us BEFORE we click login
+        print("   -> Waiting 8s for ReCaptcha Token...", flush=True)
+        time.sleep(8)
+        
+        # 5. Click Login
         print("   -> Clicking Login...", flush=True)
-        btn_clicked = False
-        
-        # Strategy A: Text
-        if not btn_clicked:
-            try:
-                btn = driver.find_element(By.XPATH, "//button[contains(text(), 'LOGIN')]")
-                driver.execute_script("arguments[0].click();", btn)
-                btn_clicked = True
-            except: pass
-            
-        # Strategy B: Submit Type
-        if not btn_clicked:
-            try:
-                btn = driver.find_element(By.XPATH, "//button[@type='submit']")
-                driver.execute_script("arguments[0].click();", btn)
-                btn_clicked = True
-            except: pass
-            
-        # Strategy C: Enter Key
-        if not btn_clicked:
-            print("   -> Using Enter Key fallback...", flush=True)
+        try:
+            # Try finding the button by text
+            btn = driver.find_element(By.XPATH, "//button[contains(text(), 'LOGIN')]")
+            driver.execute_script("arguments[0].click();", btn)
+        except:
+            # Fallback to Enter key
+            print("   -> Button not found, using Enter Key...", flush=True)
             pass_in.send_keys(Keys.RETURN)
 
-        # 4. Wait & Check for ReCaptcha Error
-        print("   -> Waiting for response...", flush=True)
-        time.sleep(10)
+        # 6. Wait for Result
+        print("   -> Waiting for redirect...", flush=True)
+        time.sleep(15)
         
-        body_text = driver.find_element(By.TAG_NAME, "body").text
-        
-        # CHECK FOR RECAPTCHA ERROR
-        if "ReCaptcha" in body_text or "TOKEN error" in body_text:
-            print("⚠️ ReCaptcha Blocked us. Refreshing to get a new token...", flush=True)
-            return "RETRY"
-            
         if "auth" in driver.current_url or "Sign" in driver.title:
-            print("❌ Login Failed. Still on page.", flush=True)
-            if "Invalid" in body_text:
-                send_telegram("❌ Login Failed: Invalid Credentials.")
-                return False
-            return "RETRY" # Try again if unknown error
+            print("❌ Login Failed.", flush=True)
+            body = driver.find_element(By.TAG_NAME, "body").text
+            if "ReCaptcha" in body or "TOKEN" in body:
+                print("⚠️ ReCaptcha Error again. Refreshing...", flush=True)
+                return "RETRY"
+            return False
             
         print("✅ Login Successful!", flush=True)
         return True
@@ -197,7 +174,7 @@ def find_and_monitor_game(driver):
     last_alert = []
     start_time = time.time()
     
-    while time.time() - start_time < 1200: # 20 mins
+    while time.time() - start_time < 1200:
         script = f"""
         var changed = [];
         var els = document.getElementsByClassName('{target_class}');
@@ -236,29 +213,24 @@ def main():
             driver.get(GAME_URL)
             time.sleep(10)
             
-            # LOGIN LOOP (Try 3 times)
             if "Sign" in driver.title or "auth" in driver.current_url:
                 login_success = False
-                for attempt in range(3):
+                for attempt in range(3): # Try 3 times
                     print(f"🔄 Login Attempt {attempt+1}/3...", flush=True)
-                    result = perform_login(driver)
-                    
-                    if result == True:
+                    res = perform_login(driver)
+                    if res == True:
                         login_success = True
                         break
-                    elif result == "RETRY":
-                        print("   -> Retrying login in 5 seconds...", flush=True)
+                    elif res == "RETRY":
                         driver.refresh()
                         time.sleep(5)
-                    else:
-                        break # Stop on fatal error
                 
                 if not login_success:
-                    print("❌ All login attempts failed.", flush=True)
+                    print("❌ Aborting. Waiting 2 minutes...", flush=True)
                     driver.quit()
-                    time.sleep(60)
+                    time.sleep(120)
                     continue
-                
+                    
                 driver.get(GAME_URL)
                 time.sleep(10)
                 
