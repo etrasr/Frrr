@@ -4,7 +4,6 @@ import os
 import threading
 import sys
 import random
-import math
 from flask import Flask
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
@@ -38,16 +37,16 @@ def send_telegram(message):
                           data={"chat_id": CHAT_ID, "text": message})
         except: pass
 
-# --- BROWSER SETUP (DESKTOP + STEALTH) ---
+# --- BROWSER SETUP (STEALTH DESKTOP) ---
 def setup_driver():
-    print("   -> Launching Chrome (Desktop Stealth)...", flush=True)
+    print("   -> Launching Chrome (Stealth Desktop)...", flush=True)
     opts = Options()
     opts.add_argument("--headless") 
     opts.add_argument("--no-sandbox")
     opts.add_argument("--disable-dev-shm-usage")
-    opts.add_argument("--window-size=1920,1080") # Full Desktop
+    opts.add_argument("--window-size=1920,1080")
     
-    # STEALTH FLAGS (The most important part for ReCaptcha)
+    # STEALTH FLAGS (Keeps ReCaptcha happy)
     opts.add_argument("--disable-blink-features=AutomationControlled")
     opts.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36")
     opts.add_experimental_option("excludeSwitches", ["enable-automation"])
@@ -56,8 +55,6 @@ def setup_driver():
     if os.environ.get("CHROME_BIN"): opts.binary_location = os.environ.get("CHROME_BIN")
     
     driver = webdriver.Chrome(options=opts)
-    
-    # Patch navigator.webdriver to be undefined
     driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
         "source": "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
     })
@@ -65,44 +62,35 @@ def setup_driver():
     driver.set_page_load_timeout(60)
     return driver
 
-# --- HUMAN SIMULATION ---
-def human_delay():
-    time.sleep(random.uniform(0.5, 1.5))
-
+# --- HELPER FUNCTIONS ---
 def fake_mouse_move(driver):
-    """Moves the invisible mouse in curves to trick ReCaptcha"""
     try:
         action = ActionChains(driver)
-        # Move to random positions
-        for _ in range(3):
-            x_offset = random.randint(-200, 200)
-            y_offset = random.randint(-100, 100)
-            action.move_by_offset(x_offset, y_offset).perform()
-            time.sleep(random.uniform(0.1, 0.3))
-            # Move back slightly to prevent out of bounds
-            action.move_by_offset(-x_offset, -y_offset).perform()
-    except:
-        pass
+        for _ in range(2):
+            x = random.randint(-50, 50)
+            y = random.randint(-50, 50)
+            action.move_by_offset(x, y).perform()
+            time.sleep(0.2)
+            action.move_by_offset(-x, -y).perform()
+    except: pass
 
 def slow_type(driver, element, text):
     driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", element)
-    time.sleep(0.5)
     element.click()
     element.clear()
     for char in text:
         element.send_keys(char)
-        time.sleep(random.uniform(0.05, 0.2)) # Random typing speed
-    human_delay()
+        time.sleep(random.uniform(0.05, 0.2))
+    time.sleep(0.5)
 
 # --- LOGIN ---
 def perform_login(driver):
-    print("🔑 Detect Login Page. Starting HUMAN Login...", flush=True)
+    print("🔑 Detect Login Page. Starting BYPASS Login...", flush=True)
     
     try:
         wait = WebDriverWait(driver, 20)
         
-        # 1. Warm Up (Move mouse)
-        print("   -> Warming up (Mouse Jiggle)...", flush=True)
+        # 1. Warm Up
         fake_mouse_move(driver)
         time.sleep(2)
         
@@ -114,35 +102,52 @@ def perform_login(driver):
         if len(visible) < 2:
             print("❌ Input Error.", flush=True)
             return False
-            
+        
         phone_in = visible[0]
         pass_in = visible[1]
         
         # 3. Type Credentials
         print("   -> Typing Phone...", flush=True)
         slow_type(driver, phone_in, LOGIN_PHONE)
-        fake_mouse_move(driver) # Move mouse between inputs
         
         print("   -> Typing Password...", flush=True)
         slow_type(driver, pass_in, LOGIN_PASSWORD)
         
-        # 4. THE MAGIC WAIT (Let ReCaptcha verify us)
-        print("   -> Waiting 10s for ReCaptcha Token generation...", flush=True)
-        time.sleep(10)
-        fake_mouse_move(driver)
+        # 4. Wait for Security Check
+        print("   -> Waiting 8s for security verification...", flush=True)
+        time.sleep(8)
         
-        # 5. Press ENTER (Most reliable method)
-        print("   -> Pressing ENTER...", flush=True)
-        pass_in.send_keys(Keys.RETURN)
+        # 5. THE FORM BYPASS SUBMIT
+        print("   -> Force-Submitting the form (Bypassing Button)...", flush=True)
         
+        try:
+            # JavaScript: Find the form belonging to the password field and submit it
+            driver.execute_script("arguments[0].form.submit();", pass_in)
+            print("   -> Executed JS Submit.", flush=True)
+        except Exception as e:
+            print(f"   -> JS Submit failed: {e}. Trying button click...", flush=True)
+            try:
+                # Backup: Try clicking any button with 'LOGIN' text
+                driver.execute_script("""
+                    var buttons = document.getElementsByTagName('button');
+                    for (var i = 0; i < buttons.length; i++) {
+                        if (buttons[i].innerText.toUpperCase().includes('LOGIN')) {
+                            buttons[i].click();
+                            break;
+                        }
+                    }
+                """)
+            except: pass
+
         # 6. Wait for Redirect
         print("   -> Waiting for redirect...", flush=True)
         time.sleep(15)
         
         if "auth" in driver.current_url or "Sign" in driver.title:
-            print("❌ Login Failed. Dumping Text:", flush=True)
+            print("❌ Login Failed.", flush=True)
+            # Dump a small part of text to check for specific error messages
             body = driver.find_element(By.TAG_NAME, "body").text
-            print(f"DEBUG: {body[:300].replace(chr(10), ' ')}", flush=True)
+            print(f"DEBUG: {body[:200].replace(chr(10), ' ')}", flush=True)
             return False
             
         print("✅ Login Successful!", flush=True)
