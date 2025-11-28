@@ -36,19 +36,27 @@ def send_telegram(message):
                           data={"chat_id": CHAT_ID, "text": message})
         except: pass
 
-# --- REAL MOBILE EMULATION ---
+# --- MANUAL MOBILE EMULATION (Safe Mode) ---
 def setup_driver():
-    print("   -> Launching Chrome (Pixel 5 Mode)...", flush=True)
+    print("   -> Launching Chrome (Manual Mobile Mode)...", flush=True)
     opts = Options()
     opts.add_argument("--headless") 
     opts.add_argument("--no-sandbox")
     opts.add_argument("--disable-dev-shm-usage")
     
-    # Enable True Mobile Emulation
-    mobile_emulation = { "deviceName": "Pixel 5" }
-    opts.add_experimental_option("mobileEmulation", mobile_emulation)
+    # 1. Set specific mobile window size
+    opts.add_argument("--window-size=393,851") # Pixel 5 dimensions
     
-    # Logging
+    # 2. Set Mobile User Agent Manually
+    mobile_ua = "Mozilla/5.0 (Linux; Android 11; Pixel 5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.91 Mobile Safari/537.36"
+    opts.add_argument(f"user-agent={mobile_ua}")
+    
+    # 3. Touch Emulation
+    opts.add_experimental_option("mobileEmulation", {
+        "deviceMetrics": { "width": 393, "height": 851, "pixelRatio": 3.0, "touch": True },
+        "userAgent": mobile_ua
+    })
+    
     opts.set_capability('goog:loggingPrefs', {'browser': 'ALL'})
     
     if os.environ.get("CHROME_BIN"): opts.binary_location = os.environ.get("CHROME_BIN")
@@ -59,7 +67,7 @@ def setup_driver():
 
 # --- LOGIN LOGIC ---
 def perform_login(driver):
-    print("🔑 Detect Login Page. Starting PIXEL 5 Login...", flush=True)
+    print("🔑 Detect Login Page. Starting MANUAL MOBILE Login...", flush=True)
     
     try:
         wait = WebDriverWait(driver, 20)
@@ -85,8 +93,7 @@ def perform_login(driver):
         phone_in.clear()
         phone_in.send_keys(LOGIN_PHONE)
         time.sleep(0.5)
-        
-        # Click the "Header" or Body to blur the phone input
+        # Click Body to blur
         driver.find_element(By.TAG_NAME, "body").click()
         time.sleep(0.5)
         
@@ -95,38 +102,34 @@ def perform_login(driver):
         pass_in.clear()
         pass_in.send_keys(LOGIN_PASSWORD)
         time.sleep(0.5)
-        
-        # Click Body again to validate password
+        # Click Body to blur
         driver.find_element(By.TAG_NAME, "body").click()
         time.sleep(1)
 
         # 3. SUBMIT STRATEGY
         print("   -> Attempting Submission...", flush=True)
         
-        # Strategy A: Press ENTER on Password (Most reliable on mobile)
+        # A. Press ENTER (Best for mobile)
         print("      (Pressing ENTER)", flush=True)
         pass_in.send_keys(Keys.RETURN)
         
-        # Wait small bit to see if it redirects
         time.sleep(5)
         
-        # Strategy B: If still on login, Click the Button
+        # B. If failed, Click Button
         if "auth" in driver.current_url or "Sign" in driver.title:
-            print("      (Enter didn't work. Finding Button...)", flush=True)
+            print("      (Enter didn't work. finding Button...)", flush=True)
             try:
-                # Find the yellow button
+                # Find LOGIN button
                 btn = driver.find_element(By.XPATH, "//button[contains(text(), 'LOGIN')]")
-                # Scroll it into view
                 driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", btn)
                 time.sleep(0.5)
-                # Click
                 btn.click()
-                print("      (Clicked 'LOGIN' Button)", flush=True)
+                print("      (Clicked 'LOGIN')", flush=True)
             except:
                 try:
                     btn = driver.find_element(By.XPATH, "//button[@type='submit']")
                     btn.click()
-                    print("      (Clicked 'Submit' Button)", flush=True)
+                    print("      (Clicked Submit)", flush=True)
                 except: pass
 
         # 4. Verify
@@ -134,16 +137,11 @@ def perform_login(driver):
         time.sleep(15)
         
         if "auth" in driver.current_url or "Sign" in driver.title:
-            print("❌ Login Failed. Dumping page text...", flush=True)
+            print("❌ Login Failed. Dumping HTML...", flush=True)
             body = driver.find_element(By.TAG_NAME, "body").text
-            # Look for specific error messages
-            if "Invalid" in body or "Incorrect" in body:
+            if "Invalid" in body:
                 print("   -> ERROR: Invalid Credentials", flush=True)
                 send_telegram("❌ Login Failed: Invalid Credentials")
-            elif "blocked" in body:
-                print("   -> ERROR: Account Blocked", flush=True)
-            else:
-                print(f"   -> UNKNOWN ERROR. Page Text Sample: {body[:100]}")
             return False
             
         print("✅ Login Successful!", flush=True)
