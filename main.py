@@ -7,6 +7,8 @@ from flask import Flask
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
+from selenium.webdriver.common.keys import Keys
+from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 
@@ -20,7 +22,7 @@ LOGIN_PHONE = os.environ.get("LOGIN_PHONE")
 LOGIN_PASSWORD = os.environ.get("LOGIN_PASSWORD")
 GAME_URL = "https://flashsport.bet/en/casino?game=%2Fkeno1675&returnUrl=casino"
 
-# --- SERVER ---
+# --- SERVER (Keep Render Alive) ---
 app = Flask(__name__)
 @app.route('/')
 def home(): return "Bot Running"
@@ -45,97 +47,81 @@ def setup_driver():
     opts.add_argument("--disable-dev-shm-usage")
     opts.add_argument("--disable-gpu")
     opts.add_argument("--window-size=1366,768")
-    opts.add_argument("user-agent=Mozilla/5.0 (Linux; Android 10; SM-A205U) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/99.0.4844.88 Mobile Safari/537.36")
+    # Matches your mobile screenshot user agent
+    opts.add_argument("user-agent=Mozilla/5.0 (Linux; Android 11; SM-G991B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/89.0.4389.105 Mobile Safari/537.36")
+    
     if os.environ.get("CHROME_BIN"): opts.binary_location = os.environ.get("CHROME_BIN")
+    
     driver = webdriver.Chrome(options=opts)
-    driver.set_page_load_timeout(90) # Increased timeout for slow connection
+    driver.set_page_load_timeout(90)
     return driver
 
-# --- JS HELPER ---
-def js_type(driver, element, value):
-    driver.execute_script("""
-        arguments[0].value = arguments[1];
-        arguments[0].dispatchEvent(new Event('input', { bubbles: true }));
-        arguments[0].dispatchEvent(new Event('change', { bubbles: true }));
-        arguments[0].dispatchEvent(new Event('blur', { bubbles: true }));
-    """, element, value)
+# --- HUMAN TYPING ---
+def human_type(driver, element, text):
+    """Clicks element and types text like a human to trigger site validation"""
+    try:
+        driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", element)
+        time.sleep(0.5)
+        element.click()
+        element.clear()
+        time.sleep(0.2)
+        element.send_keys(text)
+        time.sleep(0.5)
+        # Trigger blur to ensure validation happens
+        driver.execute_script("arguments[0].dispatchEvent(new Event('blur', { bubbles: true }));", element)
+        return True
+    except Exception as e:
+        print(f"⚠️ Typing error: {e}", flush=True)
+        return False
 
-# --- SMART LOGIN ---
-def perform_universal_login(driver):
-    print("🔑 Detect Login Page. Starting Universal Login...", flush=True)
+# --- LOGIN LOGIC ---
+def perform_login(driver):
+    print("🔑 Detect Login Page. Starting Human Login...", flush=True)
     
     try:
-        wait = WebDriverWait(driver, 30) # Wait up to 30 seconds
+        wait = WebDriverWait(driver, 20)
         
-        # 1. Find ALL Input fields
-        print("   -> Searching for input boxes...", flush=True)
-        # We wait for at least one input to appear
-        wait.until(EC.presence_of_element_located((By.TAG_NAME, "input")))
-        inputs = driver.find_elements(By.TAG_NAME, "input")
+        # 1. Identify Inputs by Placeholder/Type (More accurate)
+        print("   -> Finding inputs...", flush=True)
         
-        # Filter for visible inputs only
-        visible_inputs = [i for i in inputs if i.is_displayed() and i.get_attribute('type') != 'hidden']
-        print(f"   -> Found {len(visible_inputs)} visible inputs.", flush=True)
+        # Phone Input (Looking for 'Phone' in placeholder)
+        phone_input = wait.until(EC.presence_of_element_located((By.XPATH, "//input[contains(@placeholder, 'Phone') or contains(@placeholder, 'username')]")))
         
-        if len(visible_inputs) < 2:
-            print("❌ Not enough input fields found!", flush=True)
-            # Dump page text to debug
-            print(f"DEBUG PAGE TEXT: {driver.find_element(By.TAG_NAME, 'body').text[:200]}", flush=True)
-            return False
-
-        # 2. Strategy: 1st Input = Phone, Last Input (Password type) = Password
-        phone_box = visible_inputs[0]
+        # Password Input
+        pass_input = driver.find_element(By.XPATH, "//input[@type='password']")
         
-        # Find password box (look for type='password')
-        pass_box = None
-        for i in visible_inputs:
-            if i.get_attribute('type') == 'password':
-                pass_box = i
-                break
+        # 2. Type Credentials
+        print("   -> Typing Phone...", flush=True)
+        human_type(driver, phone_input, LOGIN_PHONE)
         
-        # If no password type found, just take the second box
-        if not pass_box and len(visible_inputs) >= 2:
-            pass_box = visible_inputs[1]
-            
-        # 3. Type Credentials
-        print("   -> Injecting Phone...", flush=True)
-        js_type(driver, phone_box, LOGIN_PHONE)
-        time.sleep(1)
+        print("   -> Typing Password...", flush=True)
+        human_type(driver, pass_input, LOGIN_PASSWORD)
         
-        print("   -> Injecting Password...", flush=True)
-        js_type(driver, pass_box, LOGIN_PASSWORD)
-        time.sleep(1)
-        
-        # 4. Click LOGIN Button
+        # 3. Click The BIG LOGIN Button
         print("   -> Clicking Login Button...", flush=True)
-        # Search for any button with 'log' or 'sign' in text OR the 'yellow' button class if known
-        # We try a broad XPath search
-        clicked = False
+        
+        # We look for the button specifically inside the form area, not the header
+        # The XPath below looks for a button with text 'LOGIN' that comes AFTER the password field
         try:
-            # Try text based
-            btn = driver.find_element(By.XPATH, "//button[contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'log')]")
-            driver.execute_script("arguments[0].click();", btn)
-            clicked = True
+            # Try pressing ENTER on the password field first (Most reliable)
+            pass_input.send_keys(Keys.RETURN)
+            print("      (Pressed ENTER key)", flush=True)
         except:
-            # Try submit type
-            try:
-                btn = driver.find_element(By.XPATH, "//button[@type='submit']")
-                driver.execute_script("arguments[0].click();", btn)
-                clicked = True
-            except:
-                print("⚠️ Could not find specific Login button. Pressing ENTER on password box...", flush=True)
-                pass_box.send_keys(u'\ue007') # Press Enter
-                clicked = True
-
+            # Fallback to clicking the submit button
+            submit_btn = driver.find_element(By.XPATH, "//button[@type='submit']")
+            driver.execute_script("arguments[0].click();", submit_btn)
+            print("      (Clicked Submit button)", flush=True)
+            
         time.sleep(15)
         
-        # 5. Verify
+        # 4. Verify
         if "auth" in driver.current_url or "Sign" in driver.title:
             print("❌ Login Failed. Still on login page.", flush=True)
-            # Check for error text
             body = driver.find_element(By.TAG_NAME, "body").text
             if "Invalid" in body or "Incorrect" in body:
-                send_telegram("❌ Login Failed: Invalid Phone/Password.")
+                send_telegram("❌ Login Failed: Website says Invalid Phone/Password.")
+            else:
+                send_telegram("❌ Login Failed: Unknown reason (Button might be disabled).")
             return False
             
         print("✅ Login Successful!", flush=True)
@@ -150,7 +136,6 @@ def find_and_monitor_game(driver):
     print("🔎 Searching for Keno Grid...", flush=True)
     driver.switch_to.default_content()
     
-    # Keno Logic
     frames = driver.find_elements(By.TAG_NAME, "iframe")
     target_class = None
     
@@ -220,7 +205,7 @@ def main():
             time.sleep(10)
             
             if "Sign" in driver.title or "auth" in driver.current_url:
-                if not perform_universal_login(driver):
+                if not perform_login(driver):
                     driver.quit()
                     time.sleep(30)
                     continue
