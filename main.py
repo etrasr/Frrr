@@ -1,6 +1,8 @@
 import time
 import requests
 import os
+import threading
+from flask import Flask
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
@@ -12,10 +14,20 @@ TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 CHAT_ID = os.environ.get("CHAT_ID")
 LOGIN_PHONE = os.environ.get("LOGIN_PHONE")
 LOGIN_PASSWORD = os.environ.get("LOGIN_PASSWORD")
-
-# Direct link to game
 GAME_URL = "https://flashsport.bet/en/casino?game=%2Fkeno1675&returnUrl=casino"
 
+# --- FAKE WEB SERVER (To keep Render happy) ---
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    return "Bot is running..."
+
+def run_server():
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host='0.0.0.0', port=port)
+
+# --- TELEGRAM FUNCTION ---
 def send_telegram(message):
     print(f"🔔 {message}")
     if TELEGRAM_TOKEN and CHAT_ID:
@@ -25,202 +37,203 @@ def send_telegram(message):
         except:
             pass
 
+# --- BROWSER SETUP ---
 def setup_driver():
     chrome_options = Options()
     chrome_options.add_argument("--headless") 
     chrome_options.add_argument("--no-sandbox")
     chrome_options.add_argument("--disable-dev-shm-usage")
     chrome_options.add_argument("--window-size=1920,1080")
-    # Using a modern Desktop User Agent to avoid Mobile Overlay issues
-    chrome_options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
+    # Crucial: Look exactly like a real Android phone
+    chrome_options.add_argument("user-agent=Mozilla/5.0 (Linux; Android 10; SM-A205U) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/99.0.4844.88 Mobile Safari/537.36")
     
     if os.environ.get("CHROME_BIN"):
         chrome_options.binary_location = os.environ.get("CHROME_BIN")
     
     return webdriver.Chrome(options=chrome_options)
 
-def angular_input(driver, element, value):
+# --- THE "MAGIC" JAVASCRIPT TYPING FUNCTION ---
+def force_input(driver, xpath, value):
     """
-    This function forces Angular to recognize that we typed something.
-    Standard Selenium .send_keys() often fails on sites like this.
+    Finds an element and forces the value using JavaScript.
+    This bypasses disabled buttons and event listeners.
     """
-    driver.execute_script("""
-        var elem = arguments[0];
-        var value = arguments[1];
-        elem.value = value;
-        elem.dispatchEvent(new Event('input', { bubbles: true }));
-        elem.dispatchEvent(new Event('change', { bubbles: true }));
-        elem.dispatchEvent(new Event('blur', { bubbles: true }));
-    """, element, value)
+    try:
+        element = driver.find_element(By.XPATH, xpath)
+        # This script sets the value AND tells the website "The value just changed!"
+        driver.execute_script("""
+            arguments[0].value = arguments[1];
+            arguments[0].dispatchEvent(new Event('input', { bubbles: true }));
+            arguments[0].dispatchEvent(new Event('change', { bubbles: true }));
+        """, element, value)
+        return True
+    except Exception as e:
+        print(f"⚠️ JS Injection failed for {value}: {e}")
+        return False
 
-def perform_login(driver):
-    print("🔑 Logic: Angular Injection Mode")
+# --- LOGIN LOGIC ---
+def perform_deep_login(driver):
+    print("🔑 Starting DEEP LOGIN process...")
     
     try:
         wait = WebDriverWait(driver, 20)
         
-        # 1. Find the Phone Input (using the specific attributes seen in your logs)
-        print("   - Finding Phone Input...")
-        phone_input = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "input[formcontrolname='login']")))
-        
-        # 2. Inject Phone Number (Angular Safe Way)
-        angular_input(driver, phone_input, LOGIN_PHONE)
-        print(f"   - Phone injected ({LOGIN_PHONE}).")
+        # 1. Inject Phone
+        print("   - Injecting Phone...")
+        wait.until(EC.presence_of_element_located((By.XPATH, "//input[@type='tel' or contains(@name, 'phone')]")))
+        force_input(driver, "//input[@type='tel' or contains(@name, 'phone')]", LOGIN_PHONE)
         time.sleep(1)
         
-        # 3. Find Password Input
-        print("   - Finding Password Input...")
-        pass_input = driver.find_element(By.CSS_SELECTOR, "input[type='password']")
-        
-        # 4. Inject Password (Angular Safe Way)
-        angular_input(driver, pass_input, LOGIN_PASSWORD)
-        print("   - Password injected.")
+        # 2. Inject Password
+        print("   - Injecting Password...")
+        force_input(driver, "//input[@type='password']", LOGIN_PASSWORD)
         time.sleep(1)
         
-        # 5. NUCLEAR OPTION: Submit the Form Directly
-        # We don't click the button. We find the <form> and force the browser to submit it.
-        print("   - Force-Submitting the Form...")
+        # 3. Force Click Login
+        print("   - Force Clicking Login...")
         try:
-            form = driver.find_element(By.TAG_NAME, "form")
-            driver.execute_script("arguments[0].submit();", form)
-        except Exception as e:
-            print(f"   - Form submit failed ({e}), trying button click as backup...")
-            # Backup: Click the login button if form submit fails
-            btn = driver.find_element(By.XPATH, "//*[contains(text(), 'LOGIN')]")
+            # Try specific text first
+            btn = driver.find_element(By.XPATH, "//button[contains(text(), 'LOGIN')]")
+            driver.execute_script("arguments[0].click();", btn)
+        except:
+            # Try generic submit button
+            btn = driver.find_element(By.XPATH, "//button[@type='submit']")
             driver.execute_script("arguments[0].click();", btn)
 
-        # 6. Wait for URL Change
-        print("   - Waiting for Redirect (Max 20s)...")
-        time.sleep(5)
+        # 4. Wait for redirection
+        print("   - Waiting for redirect...")
+        time.sleep(15)
         
-        # Check loops to see if we moved
-        for i in range(15):
-            if "auth" not in driver.current_url and "Sign" not in driver.title:
-                print(f"   - ✅ Success! We left the login page. Current Title: {driver.title}")
-                return True
-            time.sleep(1)
+        # 5. Check Result
+        if "auth" in driver.current_url or "Sign" in driver.title:
+            print("❌ Login Stuck. Dumping page text to find error...")
+            body = driver.find_element(By.TAG_NAME, "body").text
+            if "Invalid" in body:
+                send_telegram("❌ Login Failed: Website says Invalid Credentials.")
+            else:
+                send_telegram(f"❌ Login Failed. URL: {driver.current_url}")
+            return False
             
-        print("❌ Login timed out. Still on login page.")
-        
-        # Check for error text
-        body = driver.find_element(By.TAG_NAME, "body").text
-        if "Invalid" in body or "Incorrect" in body:
-            send_telegram(f"❌ Login Credential Error. The site says your Phone/Pass is wrong.")
-        else:
-            send_telegram(f"❌ Login Stuck. We are at: {driver.current_url}")
-            
-        return False
-        
+        print("✅ Login Successful!")
+        return True
+
     except Exception as e:
-        print(f"❌ Logic Crash: {e}")
+        print(f"❌ Login Crashed: {e}")
         return False
 
-def find_game_grid(driver):
-    print("🔎 Scanning for Keno grid...")
+# --- GAME FINDING LOGIC ---
+def find_and_monitor_game(driver):
+    print("🔎 Searching for Keno Grid...")
     
-    # 1. Check Main Page
-    cls = detect_grid_logic(driver)
-    if cls: return cls
-
-    # 2. Check Iframes
+    # Switch to default content to start fresh
+    driver.switch_to.default_content()
+    
     frames = driver.find_elements(By.TAG_NAME, "iframe")
-    print(f"  - Found {len(frames)} frames. Checking inside them...")
+    print(f"  - Found {len(frames)} frames.")
     
+    target_class = None
+    
+    # 1. Find the Grid
     for i, frame in enumerate(frames):
         try:
             driver.switch_to.default_content()
             driver.switch_to.frame(frame)
-            cls = detect_grid_logic(driver)
-            if cls:
-                print(f"✅ FOUND GAME inside Frame #{i+1}!")
-                return cls
+            
+            # Look for '80'
+            potential_80s = driver.find_elements(By.XPATH, "//*[text()='80']")
+            for el in potential_80s:
+                cls = el.get_attribute("class")
+                if cls:
+                    base = cls.split()[0]
+                    siblings = driver.find_elements(By.CLASS_NAME, base)
+                    if 70 <= len(siblings) <= 90:
+                        target_class = base
+                        print(f"✅ LOCKED ON FRAME #{i+1} with Class: {target_class}")
+                        break
+            if target_class: break
         except:
             continue
             
-    return None
+    if not target_class:
+        print("❌ Could not find Keno grid in any frame.")
+        return False
 
-def detect_grid_logic(driver):
-    try:
-        # Search for text '80'
-        potential_80s = driver.find_elements(By.XPATH, "//*[text()='80']")
-        for el in potential_80s:
-            class_name = el.get_attribute("class")
-            if not class_name: continue
-            base_class = class_name.split()[0]
-            siblings = driver.find_elements(By.CLASS_NAME, base_class)
-            if 70 <= len(siblings) <= 90:
-                return base_class
-    except:
-        pass
-    return None
-
-def main():
-    if not LOGIN_PHONE or not LOGIN_PASSWORD:
-        print("❌ Error: Missing credentials.")
-        return
-
-    driver = setup_driver()
-    print("🚀 Bot Started (Angular Injection Mode)...")
+    send_telegram(f"✅ Bot Active! Watching for flashes...")
     
-    try:
-        driver.get(GAME_URL)
-        time.sleep(5)
-        
-        # LOGIN CHECK
-        if "Sign" in driver.title or "auth" in driver.current_url:
-            success = perform_login(driver)
-            if not success:
-                driver.quit()
-                return
-            
-            # Navigate explicitly to game again to be safe
-            driver.get(GAME_URL)
-            time.sleep(15)
-
-        # FIND GRID
-        keno_class = find_game_grid(driver)
-        
-        if not keno_class:
-            send_telegram(f"❌ Login worked, but cannot find numbers. Title: {driver.title}")
-            return
-
-        msg = f"✅ LOCKED ON! Tracking via class: '{keno_class}'"
-        print(msg)
-        send_telegram(msg)
-        
-        last_alert_numbers = []
-        
-        while True:
-            script = f"""
-            var changed_numbers = [];
-            var elements = document.getElementsByClassName('{keno_class}');
-            for (var i = 0; i < elements.length; i++) {{
-                if (elements[i].className.length > '{keno_class}'.length + 2) {{
-                    changed_numbers.push(elements[i].innerText);
-                }}
+    # 2. Watch Loop
+    last_alert = []
+    
+    # Run loop for 30 minutes then reload page to stay fresh
+    start_time = time.time()
+    
+    while time.time() - start_time < 1800:
+        script = f"""
+        var changed = [];
+        var els = document.getElementsByClassName('{target_class}');
+        for (var i=0; i<els.length; i++) {{
+            // If class name is longer than base, it has a modifier (green/active)
+            if (els[i].className.length > '{target_class}'.length + 2) {{
+                changed.push(els[i].innerText);
             }}
-            return changed_numbers;
-            """
+        }}
+        return changed;
+        """
+        try:
+            active = driver.execute_script(script)
+            if active:
+                active.sort()
+                if active != last_alert:
+                    # Clean data
+                    clean = [n for n in active if n.strip().isdigit()]
+                    if clean:
+                        msg = f"⚡ FLASH: {', '.join(clean)}"
+                        print(msg)
+                        send_telegram(msg)
+                        last_alert = active
+        except:
+            print("⚠️ Lost frame connection.")
+            return False # Break to restart logic
             
-            try:
-                active_numbers = driver.execute_script(script)
-                if active_numbers:
-                    active_numbers.sort()
-                    if active_numbers != last_alert_numbers:
-                        clean_nums = [n for n in active_numbers if n.strip().isdigit()]
-                        if clean_nums:
-                            alert_msg = f"⚡ FLASH: {', '.join(clean_nums)}"
-                            print(alert_msg)
-                            send_telegram(alert_msg)
-                            last_alert_numbers = active_numbers
-            except:
-                break
-            time.sleep(0.1)
+        time.sleep(0.1)
+        
+    return True # Time to reload
+
+# --- MAIN EXECUTION ---
+def main():
+    # Start Dummy Server in Background
+    server_thread = threading.Thread(target=run_server)
+    server_thread.daemon = True
+    server_thread.start()
+    
+    print("🚀 Bot Process Started.")
+    
+    while True:
+        try:
+            driver = setup_driver()
+            driver.get(GAME_URL)
+            time.sleep(5)
             
-    except Exception as e:
-        print(f"Error: {e}")
-    finally:
-        driver.quit()
+            if "Sign" in driver.title or "auth" in driver.current_url:
+                if not perform_deep_login(driver):
+                    driver.quit()
+                    time.sleep(60) # Wait before retry
+                    continue
+                    
+                # Force reload game after login
+                driver.get(GAME_URL)
+                time.sleep(10)
+                
+            # Start Monitoring
+            success = find_and_monitor_game(driver)
+            
+            driver.quit()
+            if not success:
+                print("🔄 Restarting browser due to failure...")
+                time.sleep(5)
+            
+        except Exception as e:
+            print(f"💥 Main Crash: {e}")
+            time.sleep(10)
 
 if __name__ == "__main__":
     main()
