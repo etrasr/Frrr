@@ -44,9 +44,11 @@ def setup_driver():
     opts.add_argument("--no-sandbox")
     opts.add_argument("--disable-dev-shm-usage")
     
+    # MOBILE EMULATION (Nexus 5X) - Essential for correct layout
     mobile_emulation = { "deviceName": "Nexus 5X" }
     opts.add_experimental_option("mobileEmulation", mobile_emulation)
     
+    # STEALTH FLAGS
     opts.add_argument("--disable-blink-features=AutomationControlled")
     opts.add_experimental_option("excludeSwitches", ["enable-automation"])
     opts.add_experimental_option("useAutomationExtension", False)
@@ -57,22 +59,35 @@ def setup_driver():
     driver.set_page_load_timeout(60)
     return driver
 
-# --- HELPER: ROBUST TYPE ---
+# --- CRITICAL: REACT TYPING ---
 def robust_type(driver, element, text):
+    """Types and forces the website to acknowledge the input"""
     driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", element)
     time.sleep(0.5)
-    try: element.click(); element.clear()
+    try:
+        element.click()
+        element.clear()
     except: pass
+    
+    # Type slowly
     for char in text:
         element.send_keys(char)
         time.sleep(0.05)
-    # Force React Update
-    driver.execute_script("arguments[0].dispatchEvent(new Event('input', { bubbles: true }));", element)
+    
+    # FORCE EVENTS (The Key Fix)
+    driver.execute_script("""
+        let ev1 = new Event('input', { bubbles: true });
+        let ev2 = new Event('change', { bubbles: true });
+        let ev3 = new Event('blur', { bubbles: true });
+        arguments[0].dispatchEvent(ev1);
+        arguments[0].dispatchEvent(ev2);
+        arguments[0].dispatchEvent(ev3);
+    """, element)
     time.sleep(0.5)
 
-# --- LOGIN LOGIC ---
+# --- LOGIN ---
 def perform_login(driver):
-    print("🔑 Detect Login Page. Starting GEOMETRIC Login...", flush=True)
+    print("🔑 Detect Login Page. Starting FINAL ROBUST Login...", flush=True)
     
     try:
         wait = WebDriverWait(driver, 20)
@@ -100,52 +115,32 @@ def perform_login(driver):
             driver.execute_script("arguments[0].click();", checkbox)
         except: pass
 
-        # 4. GEOMETRIC BUTTON FINDER
-        print("   -> Scanning based on Coordinates...", flush=True)
-        
-        # Get Y-Coordinate of Password Box
-        pass_rect = pass_in.rect
-        pass_y = pass_rect['y'] + pass_rect['height']
-        print(f"      Password Box ends at Y={pass_y}", flush=True)
-        
-        # Find ALL potential buttons (Button tag, Input Submit, or Divs looking like buttons)
-        candidates = driver.find_elements(By.XPATH, "//button | //input[@type='submit'] | //div[contains(@class, 'button')]")
-        
+        # 4. FIND BUTTON (Using XPath Neighbor Strategy)
+        print("   -> Finding Button...", flush=True)
         target_btn = None
         
-        for btn in candidates:
-            if not btn.is_displayed(): continue
+        # Strategy: Find the Password Box, then find the immediate next <button> tag
+        try:
+            target_btn = driver.find_element(By.XPATH, "//input[@type='password']/following::button[1]")
+            print(f"      + Found neighbor button! Text='{target_btn.text}'")
+        except:
+            print("      - Neighbor search failed. Trying generic submit.")
             
-            # Get Button Data
-            txt = btn.text.upper()
-            rect = btn.rect
-            btn_y = rect['y']
-            
-            # CRITERIA 1: Must be BELOW password box
-            if btn_y <= pass_y:
-                continue 
-            
-            # CRITERIA 2: Must NOT be Register/Restore
-            if "REGISTER" in txt or "RESTORE" in txt or "FORGOT" in txt:
-                continue
-            
-            # CRITERIA 3: Must contain LOGIN or SIGN IN
-            if "LOG" in txt or "SIGN" in txt or btn.get_attribute("type") == "submit":
-                print(f"      + MATCH FOUND! Text='{txt}' at Y={btn_y}")
-                target_btn = btn
-                break # We take the FIRST valid button below password
-        
+        if not target_btn:
+            try:
+                target_btn = driver.find_element(By.XPATH, "//button[@type='submit']")
+            except: pass
+
         # 5. CLICK
         if target_btn:
             driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", target_btn)
             time.sleep(1)
-            print(f"   -> Clicking Button: {target_btn.text}", flush=True)
-            try:
-                target_btn.click()
-            except:
-                driver.execute_script("arguments[0].click();", target_btn)
+            print("   -> Clicking...", flush=True)
+            
+            # JS Click is most reliable for mobile emulation
+            driver.execute_script("arguments[0].click();", target_btn)
         else:
-            print("⚠️ No geometric match. Using ENTER key.", flush=True)
+            print("⚠️ No button found. Using ENTER key.", flush=True)
             pass_in.send_keys(Keys.ENTER)
 
         # 6. Wait for Redirect
