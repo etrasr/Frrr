@@ -36,19 +36,21 @@ def send_telegram(message):
                           data={"chat_id": CHAT_ID, "text": message})
         except: pass
 
-# --- BROWSER SETUP (MOBILE) ---
+# --- HYBRID BROWSER SETUP ---
 def setup_driver():
-    print("   -> Launching Chrome (Mobile Mode)...", flush=True)
+    print("   -> Launching Chrome (Hybrid Mode)...", flush=True)
     opts = Options()
     opts.add_argument("--headless") 
     opts.add_argument("--no-sandbox")
     opts.add_argument("--disable-dev-shm-usage")
     
-    # 1. MOBILE EMULATION (Nexus 5X)
-    mobile_emulation = { "deviceName": "Nexus 5X" }
-    opts.add_experimental_option("mobileEmulation", mobile_emulation)
+    # 1. MOBILE DIMENSIONS (Matches your screenshot layout)
+    opts.add_argument("--window-size=375,812") 
     
-    # 2. STEALTH FLAGS
+    # 2. DESKTOP IDENTITY (To bypass ReCaptcha)
+    opts.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36")
+    
+    # 3. STEALTH FLAGS
     opts.add_argument("--disable-blink-features=AutomationControlled")
     opts.add_experimental_option("excludeSwitches", ["enable-automation"])
     opts.add_experimental_option("useAutomationExtension", False)
@@ -56,42 +58,33 @@ def setup_driver():
     if os.environ.get("CHROME_BIN"): opts.binary_location = os.environ.get("CHROME_BIN")
     
     driver = webdriver.Chrome(options=opts)
+    
+    # Hide webdriver property
+    driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
+        "source": "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
+    })
+    
     driver.set_page_load_timeout(60)
     return driver
 
-# --- HELPER: ROBUST TYPE (REACT COMPATIBLE) ---
-def robust_type(driver, element, text):
+# --- SLOW TYPING ---
+def slow_type(driver, element, text):
     driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", element)
-    time.sleep(0.5)
-    try: element.click(); element.clear()
-    except: pass
-    
+    element.click()
+    element.clear()
     for char in text:
         element.send_keys(char)
-        time.sleep(0.05)
-    
-    # FORCE REACT VALUE UPDATE
-    driver.execute_script("""
-        let input = arguments[0];
-        let lastValue = input.value;
-        input.value = arguments[1];
-        let event = new Event('input', { bubbles: true });
-        let tracker = input._valueTracker;
-        if (tracker) { tracker.setValue(lastValue); }
-        input.dispatchEvent(event);
-        input.dispatchEvent(new Event('change', { bubbles: true }));
-        input.dispatchEvent(new Event('blur', { bubbles: true }));
-    """, element, text)
+        time.sleep(random.uniform(0.05, 0.2))
     time.sleep(0.5)
 
 # --- LOGIN ---
 def perform_login(driver):
-    print("🔑 Detect Login Page. Starting GOD MODE Login...", flush=True)
+    print("🔑 Detect Login Page. Starting HYBRID Login...", flush=True)
     
     try:
         wait = WebDriverWait(driver, 20)
         
-        # 1. Find Inputs
+        # 1. Inputs
         wait.until(EC.presence_of_element_located((By.TAG_NAME, "input")))
         inputs = driver.find_elements(By.TAG_NAME, "input")
         visible = [i for i in inputs if i.is_displayed()]
@@ -99,107 +92,54 @@ def perform_login(driver):
         if len(visible) < 2:
             print("❌ Input Error.", flush=True)
             return False
-        
+            
         phone_in = visible[0]
         pass_in = visible[1]
         
         # 2. Type Credentials
         print("   -> Typing Credentials...", flush=True)
-        robust_type(driver, phone_in, LOGIN_PHONE)
-        robust_type(driver, pass_in, LOGIN_PASSWORD)
+        slow_type(driver, phone_in, LOGIN_PHONE)
+        time.sleep(0.5)
+        slow_type(driver, pass_in, LOGIN_PASSWORD)
         
-        # 3. GOD MODE BUTTON FINDER
-        print("   -> Scanning DOM for ANY clickable 'LOGIN' element...", flush=True)
+        # 3. Wait for ReCaptcha (Essential)
+        print("   -> Waiting 5s for token...", flush=True)
+        time.sleep(5)
         
-        # This script finds ANY element with text "LOGIN" below the password box
-        # and triggers a Touch Event (Tap) instead of just a click.
-        log = driver.execute_script("""
-            var passBox = arguments[0];
-            var passRect = passBox.getBoundingClientRect();
-            var limitY = passRect.bottom;
-            
-            // Search every tag type
-            var allElements = document.querySelectorAll('*');
-            var target = null;
-            
-            for (var i = 0; i < allElements.length; i++) {
-                var el = allElements[i];
-                var rect = el.getBoundingClientRect();
-                
-                // Must be visible and below password
-                if (rect.width === 0 || rect.height === 0 || rect.top <= limitY) continue;
-                
-                var txt = (el.innerText || el.textContent || "").trim().toUpperCase();
-                
-                // STRICT TEXT MATCH
-                if (txt === "LOGIN" || txt === "LOG IN" || txt === "SIGN IN") {
-                    
-                    // Filter out header by checking parents
-                    if (el.className.includes("header")) continue;
-                    
-                    target = el;
-                    break;
-                }
-            }
-            
-            if (target) {
-                target.scrollIntoView({block: 'center'});
-                
-                // DISPATCH TOUCH EVENTS (Mobile Tap)
-                var touchObj = new Touch({
-                    identifier: Date.now(),
-                    target: target,
-                    clientX: target.getBoundingClientRect().x,
-                    clientY: target.getBoundingClientRect().y,
-                    radiusX: 2.5,
-                    radiusY: 2.5,
-                    rotationAngle: 10,
-                    force: 0.5,
-                });
-                
-                var touchStart = new TouchEvent("touchstart", {
-                    cancelable: true,
-                    bubbles: true,
-                    touches: [touchObj],
-                    targetTouches: [],
-                    changedTouches: [touchObj],
-                    shiftKey: true,
-                });
-                
-                var touchEnd = new TouchEvent("touchend", {
-                    cancelable: true,
-                    bubbles: true,
-                    touches: [touchObj],
-                    targetTouches: [],
-                    changedTouches: [touchObj],
-                    shiftKey: true,
-                });
-                
-                target.dispatchEvent(touchStart);
-                target.dispatchEvent(touchEnd);
-                target.click(); // Backup click
-                
-                return "TAPPED: " + target.tagName + "." + target.className;
-            }
-            
-            // DEBUG: If not found, dump nearby HTML
-            return "NOT_FOUND";
-        """, pass_in)
-        
-        print(f"   -> Result: {log}", flush=True)
-        
-        if log == "NOT_FOUND":
-            print("⚠️ Button not found via JS. Dumping Form HTML for analysis:", flush=True)
-            # Find the parent form or container of the password box
+        # 4. FIND BUTTON (Case-Insensitive Search)
+        print("   -> Hunting for Button...", flush=True)
+        btn = None
+        try:
+            # Look for button containing "log" or "Log" or "LOG"
+            xpath = "//button[contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'log')]"
+            btn = driver.find_element(By.XPATH, xpath)
+            print("   -> Found Button via text search!", flush=True)
+        except:
             try:
-                parent = pass_in.find_element(By.XPATH, "./.. | ./../..")
-                print(f"DEBUG HTML: {parent.get_attribute('outerHTML')[:500]}", flush=True)
-            except: pass
-            
-            # Last resort enter key
-            pass_in.send_keys(Keys.ENTER)
+                # Look for submit type
+                btn = driver.find_element(By.XPATH, "//button[@type='submit']")
+                print("   -> Found Button via type='submit'!", flush=True)
+            except:
+                print("⚠️ Button not found via XPath.", flush=True)
 
-        # 4. Wait for Redirect
+        # 5. CLICK
+        if btn:
+            try:
+                # Scroll and JS Click
+                driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", btn)
+                time.sleep(0.5)
+                driver.execute_script("arguments[0].click();", btn)
+                print("   -> Clicked Button.", flush=True)
+            except Exception as e:
+                print(f"   -> Click failed: {e}", flush=True)
+        else:
+            # Fallback: Tab then Enter
+            print("   -> Trying Tab+Enter fallback...", flush=True)
+            pass_in.send_keys(Keys.TAB)
+            time.sleep(0.5)
+            pass_in.send_keys(Keys.RETURN)
+
+        # 6. Verify
         print("   -> Waiting for redirect...", flush=True)
         time.sleep(15)
         
