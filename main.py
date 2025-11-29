@@ -1,301 +1,182 @@
 import time
 import requests
 import os
-import threading
 import sys
-import json
-from flask import Flask
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
+from selenium_stealth import stealth
 
 # --- CONFIGURATION ---
 sys.stdout.reconfigure(line_buffering=True)
+
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 CHAT_ID = os.environ.get("CHAT_ID")
-LOGIN_PHONE = os.environ.get("LOGIN_PHONE")
-LOGIN_PASSWORD = os.environ.get("LOGIN_PASSWORD")
+SESSION_TOKEN = os.environ.get("SESSION_TOKEN")
+# Make sure this is the exact cookie name from your browser inspection
+# detailed below in instructions
+COOKIE_NAME = "token" 
+
+BASE_URL = "https://flashsport.bet"
+# This URL forces the mobile view which is easier to scrape
 GAME_URL = "https://flashsport.bet/en/casino?game=%2Fkeno1675&returnUrl=casino"
 
-# --- SERVER ---
-app = Flask(__name__)
-@app.route('/')
-def home(): return "Bot Running"
-def run_server():
-    app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 10000)))
+def log(message):
+    print(f"[{time.strftime('%H:%M:%S')}] {message}", flush=True)
 
-# --- TELEGRAM ---
-def send_telegram(message):
-    print(f"🔔 {message}", flush=True)
+def send_telegram_msg(message):
     if TELEGRAM_TOKEN and CHAT_ID:
         try:
-            requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", 
-                          data={"chat_id": CHAT_ID, "text": message})
+            url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+            requests.post(url, data={"chat_id": CHAT_ID, "text": message})
         except: pass
 
-# --- BROWSER SETUP (CDP ENABLED) ---
+def send_telegram_photo(driver, caption=""):
+    """
+    Takes a screenshot and sends it to Telegram immediately.
+    This is how you verify the bot is watching the right thing.
+    """
+    if TELEGRAM_TOKEN and CHAT_ID:
+        try:
+            # 1. Take Screenshot to memory
+            screenshot = driver.get_screenshot_as_png()
+            
+            # 2. Send to Telegram API
+            url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendPhoto"
+            files = {'photo': ('screen.png', screenshot)}
+            data = {'chat_id': CHAT_ID, 'caption': caption}
+            requests.post(url, data=data, files=files)
+            log("📸 Screenshot sent to Telegram!")
+        except Exception as e:
+            log(f"⚠️ Failed to send photo: {e}")
+
 def setup_driver():
-    print("   -> Launching Chrome (Pixel 5 + CDP Mode)...", flush=True)
-    opts = Options()
-    opts.add_argument("--headless") 
-    opts.add_argument("--no-sandbox")
-    opts.add_argument("--disable-dev-shm-usage")
-    opts.add_argument("--window-size=393,851") # Pixel 5
+    log("🚀 Launching Chrome...")
+    options = Options()
+    options.add_argument("--headless=new") 
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+    options.add_argument("--disable-gpu")
+    options.add_argument("--window-size=375,812") # Mobile Size
     
-    # Manual Mobile Emulation (Prevents 'Invalid Device' crash)
-    mobile_ua = "Mozilla/5.0 (Linux; Android 11; Pixel 5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.91 Mobile Safari/537.36"
-    opts.add_argument(f"user-agent={mobile_ua}")
-    opts.add_experimental_option("mobileEmulation", {
-        "deviceMetrics": { "width": 393, "height": 851, "pixelRatio": 3.0, "touch": True },
-        "userAgent": mobile_ua
-    })
+    # Standard User Agent
+    options.add_argument("user-agent=Mozilla/5.0 (Linux; Android 10; SM-A205U) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/99.0.4844.88 Mobile Safari/537.36")
+
+    driver = webdriver.Chrome(options=options)
     
-    opts.set_capability('goog:loggingPrefs', {'browser': 'ALL'})
-    if os.environ.get("CHROME_BIN"): opts.binary_location = os.environ.get("CHROME_BIN")
+    # Apply Stealth
+    stealth(driver,
+        languages=["en-US", "en"],
+        vendor="Google Inc.",
+        platform="Win32",
+        webgl_vendor="Intel Inc.",
+        renderer="Intel Iris OpenGL Engine",
+        fix_hairline=True,
+    )
     
-    driver = webdriver.Chrome(options=opts)
-    driver.set_page_load_timeout(90)
+    driver.set_page_load_timeout(60)
     return driver
 
-# --- CDP HELPER FUNCTIONS (THE ENGINE FIX) ---
-def cdp_click(driver, element):
-    """Calculates screen coordinates and clicks using the browser engine."""
+def inject_session(driver):
+    """
+    Bypasses login by injecting the cookie.
+    """
     try:
-        # Get coordinates
-        rect = driver.execute_script("return arguments[0].getBoundingClientRect();", element)
-        x = rect['x'] + (rect['width'] / 2)
-        y = rect['y'] + (rect['height'] / 2)
+        log("🍪 Injecting Session Cookie...")
+        # 1. Go to Base URL first (Required to set cookies)
+        driver.get(BASE_URL)
+        time.sleep(3)
         
-        # Simulate Touch Start
-        driver.execute_cdp_cmd("Input.dispatchTouchEvent", {
-            "type": "touchStart",
-            "touchPoints": [{"x": x, "y": y}]
+        # 2. Add the Cookie
+        driver.add_cookie({
+            "name": COOKIE_NAME, # Check if your site uses 'token', 'access_token', or 'PHPSESSID'
+            "value": SESSION_TOKEN,
+            "domain": "flashsport.bet",
+            "path": "/"
         })
-        # Simulate Touch End (Click)
-        driver.execute_cdp_cmd("Input.dispatchTouchEvent", {
-            "type": "touchEnd",
-            "touchPoints": []
-        })
-        print("      (CDP Touch Event Sent)", flush=True)
+        
+        # 3. Now go to the Game
+        log("🔄 Loading Game Page...")
+        driver.get(GAME_URL)
+        time.sleep(10) # Wait for game to load
+        return True
     except Exception as e:
-        print(f"      (CDP Click failed: {e})", flush=True)
-
-def cdp_type(driver, text):
-    """Types text directly into the browser engine (Indistinguishable from human)."""
-    for char in text:
-        driver.execute_cdp_cmd("Input.dispatchKeyEvent", {
-            "type": "keyDown", "text": char, "unmodifiedText": char, "windowsVirtualKeyCode": ord(char), "nativeVirtualKeyCode": ord(char)
-        })
-        driver.execute_cdp_cmd("Input.dispatchKeyEvent", {
-            "type": "keyUp", "text": char, "unmodifiedText": char, "windowsVirtualKeyCode": ord(char), "nativeVirtualKeyCode": ord(char)
-        })
-        time.sleep(0.05) # Tiny delay between keys
-
-def cdp_enter(driver):
-    """Hits the Enter key at the hardware level."""
-    driver.execute_cdp_cmd("Input.dispatchKeyEvent", {
-        "type": "keyDown", "windowsVirtualKeyCode": 13, "nativeVirtualKeyCode": 13, "text": "\r", "unmodifiedText": "\r"
-    })
-    driver.execute_cdp_cmd("Input.dispatchKeyEvent", {
-        "type": "keyUp", "windowsVirtualKeyCode": 13, "nativeVirtualKeyCode": 13, "text": "\r", "unmodifiedText": "\r"
-    })
-
-# --- LOGIN LOGIC ---
-def perform_login(driver):
-    print("🔑 Detect Login Page. Starting HARDWARE SIMULATION Login...", flush=True)
-    
-    try:
-        wait = WebDriverWait(driver, 30)
-        time.sleep(5)
-        
-        # 1. Inputs
-        wait.until(EC.presence_of_element_located((By.TAG_NAME, "input")))
-        inputs = driver.find_elements(By.TAG_NAME, "input")
-        visible = [i for i in inputs if i.is_displayed()]
-        
-        if len(visible) < 2:
-            print("❌ Input Error.", flush=True)
-            return False
-            
-        phone_in = visible[0]
-        pass_in = visible[1]
-        
-        # 2. Type Credentials (CDP Mode)
-        print("   -> Typing Phone (Hardware Level)...", flush=True)
-        phone_in.click() # Focus
-        time.sleep(0.5)
-        cdp_type(driver, LOGIN_PHONE)
-        
-        time.sleep(1)
-        
-        print("   -> Typing Password (Hardware Level)...", flush=True)
-        pass_in.click() # Focus
-        time.sleep(0.5)
-        cdp_type(driver, LOGIN_PASSWORD)
-        
-        time.sleep(1)
-
-        # 3. ATTEMPT 1: HARDWARE ENTER
-        print("   -> Hitting ENTER (Hardware Level)...", flush=True)
-        cdp_enter(driver)
-        
-        # 4. WAIT 30 SECONDS
-        print("   -> ⏳ Waiting 30s for redirect...", flush=True)
-        for i in range(30):
-            if "auth" not in driver.current_url and "Sign" not in driver.title:
-                print(f"      ✅ Success! Redirected after {i+1} seconds.", flush=True)
-                return True
-            time.sleep(1)
-            
-        print("   -> ⚠️ Enter key timed out. Attempt 2: Button...", flush=True)
-        
-        # 5. ATTEMPT 2: HARDWARE TOUCH
-        btn = None
-        try:
-            # Try finding the specific login button text
-            btn = driver.find_element(By.XPATH, "//*[contains(translate(text(), 'LOGIN', 'login'), 'login')]")
-        except:
-            # Fallback to submit
-            try: btn = driver.find_element(By.XPATH, "//button[@type='submit']")
-            except: pass
-            
-        if btn:
-            print(f"      -> Found Button: {btn.text}", flush=True)
-            driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", btn)
-            time.sleep(1)
-            
-            # Use CDP Touch
-            cdp_click(driver, btn)
-            
-            # Wait another 20s
-            for i in range(20):
-                if "auth" not in driver.current_url: return True
-                time.sleep(1)
-        
-        # Final Failure
-        print("❌ Login Failed. Dumping Info...", flush=True)
-        body = driver.find_element(By.TAG_NAME, "body").text
-        
-        # Detect Errors
-        if "Invalid" in body or "Incorrect" in body:
-            send_telegram("❌ Login Failed: Website says Invalid Credentials")
-        elif "blocked" in body.lower():
-            send_telegram("❌ Login Failed: Account Blocked")
-        else:
-            print(f"   -> PAGE DUMP: {body[:200]}", flush=True)
-            
+        log(f"❌ Session Injection Failed: {e}")
         return False
 
-    except Exception as e:
-        print(f"❌ Login Crash: {e}", flush=True)
-        return False
-
-# --- MONITOR ---
-def find_and_monitor_game(driver):
-    print("🔎 Searching for Keno Grid...", flush=True)
-    driver.switch_to.default_content()
+def find_game_frame(driver):
+    """
+    Finds the iframe containing the game numbers.
+    """
+    log("🔎 Looking for Game Frame...")
     
+    # If we are already in the frame, return True
+    if "80" in driver.page_source:
+        return True
+        
     frames = driver.find_elements(By.TAG_NAME, "iframe")
-    target_class = None
-    
-    for i, frame in enumerate(frames):
+    for frame in frames:
         try:
             driver.switch_to.default_content()
             driver.switch_to.frame(frame)
-            potential_80s = driver.find_elements(By.XPATH, "//*[text()='80']")
-            for el in potential_80s:
-                cls = el.get_attribute("class")
-                if cls:
-                    base = cls.split()[0]
-                    siblings = driver.find_elements(By.CLASS_NAME, base)
-                    if 70 <= len(siblings) <= 90:
-                        target_class = base
-                        print(f"✅ LOCKED ON FRAME #{i+1} with Class: {target_class}", flush=True)
-                        break
-            if target_class: break
-        except: continue
+            # Check if this frame has the number 80 (Keno grid)
+            if "80" in driver.page_source:
+                log("✅ Found Keno Game Frame!")
+                return True
+        except:
+            continue
             
-    if not target_class:
-        print("❌ Could not find Keno grid.", flush=True)
-        return False
+    log("⚠️ Could not find game frame.")
+    return False
 
-    send_telegram(f"✅ Bot Active! Watching for flashes...")
-    
-    last_alert = []
-    start_time = time.time()
-    
-    while time.time() - start_time < 1200:
-        script = f"""
-        var changed = [];
-        var els = document.getElementsByClassName('{target_class}');
-        for (var i=0; i<els.length; i++) {{
-            if (els[i].className.length > '{target_class}'.length + 2) {{
-                changed.push(els[i].innerText);
-            }}
-        }}
-        return changed;
-        """
-        try:
-            active = driver.execute_script(script)
-            if active:
-                active.sort()
-                if active != last_alert:
-                    clean = [n for n in active if n.strip().isdigit()]
-                    if clean:
-                        msg = f"⚡ FLASH: {', '.join(clean)}"
-                        print(msg, flush=True)
-                        send_telegram(msg)
-                        last_alert = active
-        except: return False 
-        time.sleep(0.1)
-    return True
-
-# --- MAIN ---
 def main():
-    threading.Thread(target=run_server, daemon=True).start()
-    print("🚀 Bot Process Started.", flush=True)
-    
+    if not SESSION_TOKEN:
+        print("❌ Error: SESSION_TOKEN is missing from Environment Variables.")
+        return
+
     while True:
-        driver = None
+        driver = setup_driver()
         try:
-            driver = setup_driver()
-            print(f"   -> Loading URL...", flush=True)
-            driver.get(GAME_URL)
-            time.sleep(10)
+            # 1. Login via Cookie
+            inject_session(driver)
             
-            if "Sign" in driver.title or "auth" in driver.current_url:
-                login_success = False
-                for attempt in range(3):
-                    print(f"🔄 Login Attempt {attempt+1}/3...", flush=True)
-                    if perform_login(driver):
-                        login_success = True
-                        break
-                    else:
-                        print("   -> Restarting browser...", flush=True)
-                        driver.quit()
-                        driver = setup_driver()
-                        driver.get(GAME_URL)
-                        time.sleep(5)
+            # 2. Find the Game (Iframe)
+            if find_game_frame(driver):
+                send_telegram_msg("✅ Bot Connected! Sending verification photo...")
                 
-                if not login_success:
-                    print("❌ Max attempts reached.", flush=True)
-                    driver.quit()
-                    time.sleep(60)
-                    continue
+                # 3. Monitor Loop
+                while True:
+                    # A. Send Proof to Telegram
+                    send_telegram_photo(driver, caption="Verifying Keno Board...")
                     
-                driver.get(GAME_URL)
-                time.sleep(10)
-                
-            success = find_and_monitor_game(driver)
+                    # B. Check for Draw ID (The regex you provided)
+                    # We use execute_script to grab text even if hidden
+                    page_text = driver.find_element(By.TAG_NAME, "body").text
+                    
+                    # Simple check to see if we are logged in
+                    if "Login" in driver.title or "Sign in" in page_text:
+                        log("❌ Cookie expired or invalid. Redirected to Login.")
+                        send_telegram_msg("⚠️ Session Token Expired. Update variable.")
+                        break
+                    
+                    log("✅ Monitoring active... (Waiting 30s)")
+                    
+                    # C. Wait 30 seconds before next check
+                    time.sleep(30)
+                    
+                    # Ensure we are still in the right frame
+                    find_game_frame(driver)
             
+            else:
+                send_telegram_msg("❌ Bot loaded page but couldn't find the Keno grid.")
+                send_telegram_photo(driver, caption="Debug: What I see")
+                
         except Exception as e:
-            print(f"💥 Crash: {e}", flush=True)
+            log(f"💥 Error: {e}")
         finally:
-            if driver: driver.quit()
-            print("🔄 Restarting...", flush=True)
-            time.sleep(5)
+            driver.quit()
+            log("🔄 Restarting Bot...")
+            time.sleep(10)
 
 if __name__ == "__main__":
     main()
