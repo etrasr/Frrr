@@ -6,7 +6,6 @@ import threading
 from flask import Flask
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.common.by import By
 from selenium_stealth import stealth
 
 # --- CONFIGURATION ---
@@ -17,9 +16,9 @@ CHAT_ID = os.environ.get("CHAT_ID")
 COOKIE_STRING = os.environ.get("COOKIE_STRING") 
 
 GAME_URL = "https://flashsport.bet/en/casino?game=%2Fkeno1675&returnUrl=casino"
-BASE_URL = "https://flashsport.bet"
+BASE_DOMAIN = "https://flashsport.bet"
 
-# --- FAKE SERVER (To keep Render alive) ---
+# --- FAKE SERVER ---
 app = Flask(__name__)
 @app.route('/')
 def home(): return "Bot Running"
@@ -27,45 +26,44 @@ def run_server():
     port = int(os.environ.get("PORT", 10000))
     app.run(host='0.0.0.0', port=port)
 
-# --- TELEGRAM FUNCTIONS ---
+# --- TELEGRAM ---
 def send_telegram_msg(message):
     print(f"🔔 {message}", flush=True)
     if TELEGRAM_TOKEN and CHAT_ID:
         try:
-            url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-            requests.post(url, data={"chat_id": CHAT_ID, "text": message})
-        except Exception as e:
-            print(f"Telegram Error: {e}")
+            requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", 
+                          data={"chat_id": CHAT_ID, "text": message})
+        except: pass
 
 def send_telegram_photo(file_path, caption=""):
     if TELEGRAM_TOKEN and CHAT_ID:
         try:
-            url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendPhoto"
             with open(file_path, "rb") as photo:
-                requests.post(url, data={"chat_id": CHAT_ID, "caption": caption}, files={"photo": photo})
-            print("📸 Screenshot sent to Telegram.")
-        except Exception as e:
-            print(f"Photo Error: {e}")
+                requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendPhoto", 
+                              data={"chat_id": CHAT_ID, "caption": caption}, files={"photo": photo})
+        except: pass
 
-# --- BROWSER SETUP ---
+# --- MOBILE BROWSER SETUP ---
 def setup_driver():
-    print("   -> Launching Chrome...", flush=True)
+    print("   -> Launching Chrome (Mobile Mode)...", flush=True)
     opts = Options()
     opts.add_argument("--headless=new") 
     opts.add_argument("--no-sandbox")
     opts.add_argument("--disable-dev-shm-usage")
     opts.add_argument("--disable-gpu")
-    opts.add_argument("--window-size=1920,1080")
     
-    # Use desktop user agent to look normal
-    opts.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36")
+    # 1. MOBILE SIZE
+    opts.add_argument("--window-size=375,812")
+    
+    # 2. MOBILE IDENTITY (Matches Android)
+    opts.add_argument("user-agent=Mozilla/5.0 (Linux; Android 10; SM-A205U) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/99.0.4844.88 Mobile Safari/537.36")
 
     if os.environ.get("CHROME_BIN"): 
         opts.binary_location = os.environ.get("CHROME_BIN")
     
     driver = webdriver.Chrome(options=opts)
     
-    # Stealth Mode
+    # Stealth settings adjusted for Mobile
     stealth(driver,
         languages=["en-US", "en"],
         vendor="Google Inc.",
@@ -82,16 +80,17 @@ def setup_driver():
 def inject_cookies(driver):
     print("🍪 Injecting Cookies...", flush=True)
     if not COOKIE_STRING:
-        print("❌ Error: COOKIE_STRING is missing in Render Settings!", flush=True)
+        print("❌ Error: COOKIE_STRING is missing!", flush=True)
         return False
         
     try:
-        # 1. Go to base domain
-        driver.get(BASE_URL)
-        time.sleep(3)
+        # TRICK: Go to the domain but a 404 page first. 
+        # This sets the domain context so we can add cookies, 
+        # but prevents the site from running its "Login Check" logic immediately.
+        driver.get(BASE_DOMAIN + "/favicon.ico") 
+        time.sleep(1)
         
-        # 2. Parse and add cookies
-        # Cookies usually look like "name=value; name2=value2"
+        # Parse Cookies
         pairs = COOKIE_STRING.split(';')
         for pair in pairs:
             if '=' in pair:
@@ -99,10 +98,10 @@ def inject_cookies(driver):
                 name = parts[0]
                 value = parts[1]
                 
+                # Add cookie without forcing a specific domain (let Selenium decide)
                 driver.add_cookie({
                     'name': name,
                     'value': value,
-                    'domain': 'flashsport.bet',
                     'path': '/'
                 })
         
@@ -114,46 +113,28 @@ def inject_cookies(driver):
 
 # --- MONITORING ---
 def monitor_game(driver):
-    print("🔎 Loading Game Page...", flush=True)
+    print("🔎 Going to Game Page...", flush=True)
     driver.get(GAME_URL)
-    time.sleep(15) # Wait for game to load
+    time.sleep(15) # Wait for load
     
-    # --- CHECK 1: LOGIN STATUS ---
-    # If we see "Sign in" in title, cookies failed/expired
-    if "Sign in" in driver.title or "Login" in driver.title:
-        print("❌ Cookie Login Failed (Redirected to Login Page).", flush=True)
-        send_telegram_msg("❌ Login Failed. Your Cookie String might be expired. Please get a new one.")
-        
-        # Take screenshot of error
-        driver.save_screenshot("login_fail.png")
-        send_telegram_photo("login_fail.png", "I am stuck here.")
+    # Check if redirected to login
+    if "Sign" in driver.title or "Login" in driver.title:
+        print("❌ Still redirected to Login.", flush=True)
+        driver.save_screenshot("fail.png")
+        send_telegram_photo("fail.png", "Still failed. The cookie might be bound to your IP address.")
         return False
 
-    # --- CHECK 2: SUCCESS SNAPSHOT ---
-    print("✅ Game Loaded! Sending verification screenshot...", flush=True)
-    send_telegram_msg("✅ Bot Connected to Game! Sending screenshot now...")
+    print("✅ SUCCESS! Game Loaded.", flush=True)
+    send_telegram_msg("✅ Bot Connected! Cookies worked.")
     
-    driver.save_screenshot("game_verify.png")
-    send_telegram_photo("game_verify.png", "👀 Do you see the Keno grid here?")
+    driver.save_screenshot("success.png")
+    send_telegram_photo("success.png", "I see the game! Monitoring now...")
     
-    # --- LOOP ---
-    print("👀 Watching game...", flush=True)
+    # Keep alive loop
     start_time = time.time()
-    
-    # We refresh every 30 mins to keep session alive
     while time.time() - start_time < 1800:
-        try:
-            # Here we will add the "Flash Detection" later
-            # For now, we just keep the connection alive to verify monitoring
-            
-            # Simple check to ensure page hasn't crashed
-            driver.find_element(By.TAG_NAME, "body") 
-            
-            time.sleep(2)
-        except Exception as e:
-            print(f"Monitor loop warning: {e}", flush=True)
-            break
-            
+        time.sleep(5)
+        
     return True
 
 # --- MAIN ---
