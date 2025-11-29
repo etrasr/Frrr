@@ -6,64 +6,65 @@ import threading
 from flask import Flask
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.common.by import By
+from selenium.webdriver.common.keys import Keys
+from selenium.webdriver.common.action_chains import ActionChains
 from selenium_stealth import stealth
 
 # --- CONFIGURATION ---
 sys.stdout.reconfigure(line_buffering=True)
-
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 CHAT_ID = os.environ.get("CHAT_ID")
-COOKIE_STRING = os.environ.get("COOKIE_STRING") 
-
+LOGIN_PHONE = os.environ.get("LOGIN_PHONE")
+LOGIN_PASSWORD = os.environ.get("LOGIN_PASSWORD")
 GAME_URL = "https://flashsport.bet/en/casino?game=%2Fkeno1675&returnUrl=casino"
-BASE_DOMAIN = "https://flashsport.bet"
 
-# --- FAKE SERVER ---
+# --- SERVER ---
 app = Flask(__name__)
 @app.route('/')
 def home(): return "Bot Running"
 def run_server():
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host='0.0.0.0', port=port)
+    app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 10000)))
 
 # --- TELEGRAM ---
-def send_telegram_msg(message):
-    print(f"🔔 {message}", flush=True)
+def send_msg(text):
+    print(f"🔔 {text}", flush=True)
     if TELEGRAM_TOKEN and CHAT_ID:
-        try:
-            requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", 
-                          data={"chat_id": CHAT_ID, "text": message})
+        try: requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", data={"chat_id": CHAT_ID, "text": text})
         except: pass
 
-def send_telegram_photo(file_path, caption=""):
+def send_photo(filename, caption=""):
     if TELEGRAM_TOKEN and CHAT_ID:
         try:
-            with open(file_path, "rb") as photo:
-                requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendPhoto", 
-                              data={"chat_id": CHAT_ID, "caption": caption}, files={"photo": photo})
+            with open(filename, "rb") as f:
+                requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendPhoto", data={"chat_id": CHAT_ID, "caption": caption}, files={"photo": f})
         except: pass
 
-# --- MOBILE BROWSER SETUP ---
+# --- FULL MOBILE EMULATION ---
 def setup_driver():
-    print("   -> Launching Chrome (Mobile Mode)...", flush=True)
+    print("   -> Launching Chrome (Pixel 5 Emulation)...", flush=True)
     opts = Options()
     opts.add_argument("--headless=new") 
     opts.add_argument("--no-sandbox")
     opts.add_argument("--disable-dev-shm-usage")
     opts.add_argument("--disable-gpu")
     
-    # 1. MOBILE SIZE
-    opts.add_argument("--window-size=375,812")
+    # EMULATE PIXEL 5 (Crucial for ReCaptcha trust)
+    mobile_emulation = {
+        "deviceMetrics": { "width": 393, "height": 851, "pixelRatio": 3.0 },
+        "userAgent": "Mozilla/5.0 (Linux; Android 11; Pixel 5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.91 Mobile Safari/537.36"
+    }
+    opts.add_experimental_option("mobileEmulation", mobile_emulation)
     
-    # 2. MOBILE IDENTITY (Matches Android)
-    opts.add_argument("user-agent=Mozilla/5.0 (Linux; Android 10; SM-A205U) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/99.0.4844.88 Mobile Safari/537.36")
-
-    if os.environ.get("CHROME_BIN"): 
-        opts.binary_location = os.environ.get("CHROME_BIN")
+    # STEALTH
+    opts.add_argument("--disable-blink-features=AutomationControlled")
+    opts.add_experimental_option("excludeSwitches", ["enable-automation"])
+    opts.add_experimental_option("useAutomationExtension", False)
+    
+    if os.environ.get("CHROME_BIN"): opts.binary_location = os.environ.get("CHROME_BIN")
     
     driver = webdriver.Chrome(options=opts)
     
-    # Stealth settings adjusted for Mobile
     stealth(driver,
         languages=["en-US", "en"],
         vendor="Google Inc.",
@@ -76,85 +77,129 @@ def setup_driver():
     driver.set_page_load_timeout(60)
     return driver
 
-# --- COOKIE INJECTION ---
-def inject_cookies(driver):
-    print("🍪 Injecting Cookies...", flush=True)
-    if not COOKIE_STRING:
-        print("❌ Error: COOKIE_STRING is missing!", flush=True)
-        return False
-        
+# --- HELPER: CLICK & SCREENSHOT ---
+def touch_click(driver, element):
+    # Simulates a finger tap
+    ActionChains(driver).move_to_element(element).click().perform()
+
+def debug_shot(driver, name):
+    driver.save_screenshot(name)
+    send_photo(name, f"Debug: {name}")
+
+# --- LOGIN LOGIC ---
+def perform_login(driver):
+    send_msg("🔑 Starting Login Process...")
+    
     try:
-        # TRICK: Go to the domain but a 404 page first. 
-        # This sets the domain context so we can add cookies, 
-        # but prevents the site from running its "Login Check" logic immediately.
-        driver.get(BASE_DOMAIN + "/favicon.ico") 
+        # 1. Load Page
+        driver.get("https://flashsport.bet/en/auth/signin")
+        time.sleep(10)
+        debug_shot(driver, "1_login_page.png")
+        
+        # 2. Find Inputs
+        inputs = driver.find_elements(By.TAG_NAME, "input")
+        visible = [i for i in inputs if i.is_displayed()]
+        
+        if len(visible) < 2:
+            send_msg("❌ Inputs not found!")
+            return False
+            
+        phone_box = visible[0]
+        pass_box = visible[1]
+        
+        # 3. Type Credentials
+        print("   -> Typing Phone...", flush=True)
+        touch_click(driver, phone_box)
+        phone_box.clear()
+        phone_box.send_keys(LOGIN_PHONE)
         time.sleep(1)
         
-        # Parse Cookies
-        pairs = COOKIE_STRING.split(';')
-        for pair in pairs:
-            if '=' in pair:
-                parts = pair.strip().split('=', 1)
-                name = parts[0]
-                value = parts[1]
-                
-                # Add cookie without forcing a specific domain (let Selenium decide)
-                driver.add_cookie({
-                    'name': name,
-                    'value': value,
-                    'path': '/'
-                })
+        print("   -> Typing Password...", flush=True)
+        touch_click(driver, pass_box)
+        pass_box.clear()
+        pass_box.send_keys(LOGIN_PASSWORD)
+        time.sleep(1)
         
-        print("✅ Cookies added.", flush=True)
+        debug_shot(driver, "2_filled_form.png")
+        
+        # 4. Handle ReCaptcha & Button
+        # Check for ReCaptcha Iframe
+        iframes = driver.find_elements(By.TAG_NAME, "iframe")
+        for frame in iframes:
+            if "recaptcha" in frame.get_attribute("src"):
+                print("⚠️ ReCaptcha Detected. Attempting to scroll it...", flush=True)
+                driver.execute_script("arguments[0].scrollIntoView();", frame)
+                
+        # 5. Click Login
+        print("   -> Searching for Button...", flush=True)
+        btns = driver.find_elements(By.TAG_NAME, "button")
+        login_btn = None
+        for b in btns:
+            if "LOGIN" in b.text.upper() or "SIGN IN" in b.text.upper():
+                login_btn = b
+                break
+                
+        if login_btn:
+            print("   -> Tapping Login Button...", flush=True)
+            # Mobile touch tap
+            touch_click(driver, login_btn)
+        else:
+            print("   -> Button not found, pressing Enter...", flush=True)
+            pass_box.send_keys(Keys.RETURN)
+            
+        # 6. Wait for Result
+        send_msg("⏳ Waiting 15s for redirection...")
+        time.sleep(15)
+        debug_shot(driver, "3_after_click.png")
+        
+        if "auth" in driver.current_url:
+            send_msg("❌ Still on login page. Check the screenshots!")
+            return False
+            
+        send_msg("✅ Login Successful!")
         return True
+
     except Exception as e:
-        print(f"❌ Cookie Error: {e}", flush=True)
+        send_msg(f"❌ Error: {e}")
         return False
 
-# --- MONITORING ---
+# --- MONITOR ---
 def monitor_game(driver):
-    print("🔎 Going to Game Page...", flush=True)
+    send_msg("🔎 Loading Game...")
     driver.get(GAME_URL)
-    time.sleep(15) # Wait for load
+    time.sleep(15)
+    debug_shot(driver, "4_game_loaded.png")
     
-    # Check if redirected to login
-    if "Sign" in driver.title or "Login" in driver.title:
-        print("❌ Still redirected to Login.", flush=True)
-        driver.save_screenshot("fail.png")
-        send_telegram_photo("fail.png", "Still failed. The cookie might be bound to your IP address.")
+    if "Sign" in driver.title:
+        send_msg("❌ Game redirected to Login.")
         return False
 
-    print("✅ SUCCESS! Game Loaded.", flush=True)
-    send_telegram_msg("✅ Bot Connected! Cookies worked.")
+    send_msg("✅ Bot Connected! Watching now...")
     
-    driver.save_screenshot("success.png")
-    send_telegram_photo("success.png", "I see the game! Monitoring now...")
-    
-    # Keep alive loop
     start_time = time.time()
     while time.time() - start_time < 1800:
         time.sleep(5)
-        
+            
     return True
 
 # --- MAIN ---
 def main():
     threading.Thread(target=run_server, daemon=True).start()
-    print("🚀 Bot Process Started.", flush=True)
+    send_msg("🚀 Bot Restarted.")
     
     while True:
         driver = None
         try:
             driver = setup_driver()
             
-            if inject_cookies(driver):
+            if perform_login(driver):
                 monitor_game(driver)
             
         except Exception as e:
-            print(f"💥 Crash: {e}", flush=True)
+            print(f"Crash: {e}")
         finally:
             if driver: driver.quit()
-            print("🔄 Restarting...", flush=True)
+            print("Restarting...", flush=True)
             time.sleep(10)
 
 if __name__ == "__main__":
