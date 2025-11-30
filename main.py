@@ -1,262 +1,252 @@
+#!/usr/bin/env python3
+"""
+KENO BOT v3 - GREEN FLASH DETECTION (24/7)
+NO DATABASE - Just Telegram alerts
+OPTIMIZED: Better error handling & timeouts
+"""
 import time
 import requests
 import os
-import sys
-import threading
-from flask import Flask
+import subprocess
+from datetime import datetime, timedelta, timezone
+from PIL import Image
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
-from selenium.webdriver.common.keys import Keys
-from selenium_stealth import stealth
 from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
+from selenium_stealth import stealth
 
-# --- CONFIGURATION ---
-sys.stdout.reconfigure(line_buffering=True)
+ETHIOPIA_TZ = timezone(timedelta(hours=3))
+
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 CHAT_ID = os.environ.get("CHAT_ID")
-LOGIN_PHONE = os.environ.get("LOGIN_PHONE")
-LOGIN_PASSWORD = os.environ.get("LOGIN_PASSWORD")
+SESSION_TOKEN = os.environ.get("SESSION_TOKEN")
 GAME_URL = "https://flashsport.bet/en/casino?game=%2Fkeno1675&returnUrl=casino"
+BASE_URL = "https://flashsport.bet"
 
-# --- SERVER ---
-app = Flask(__name__)
-@app.route('/')
-def home(): return "Bot Running"
-def run_server():
-    app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 10000)))
+def eth_time():
+    return datetime.now(ETHIOPIA_TZ).strftime("%H:%M:%S")
 
-# --- TELEGRAM ---
-def send_msg(text):
-    print(f"🔔 {text}", flush=True)
-    if TELEGRAM_TOKEN and CHAT_ID:
-        try: requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", data={"chat_id": CHAT_ID, "text": text})
-        except: pass
+def log_msg(msg):
+    ts = eth_time()
+    print(f"[{ts}] {msg}", flush=True)
 
-def send_photo(filename, caption=""):
-    if TELEGRAM_TOKEN and CHAT_ID:
-        try:
-            with open(filename, "rb") as f:
-                requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendPhoto", data={"chat_id": CHAT_ID, "caption": caption}, files={"photo": f})
-        except: pass
-
-# --- BROWSER SETUP ---
-def setup_driver():
-    print("   -> Launching Chrome...", flush=True)
-    opts = Options()
-    opts.add_argument("--headless=new") 
-    opts.add_argument("--no-sandbox")
-    opts.add_argument("--disable-dev-shm-usage")
-    opts.add_argument("--disable-gpu")
-    opts.add_argument("--window-size=375,812") # iPhone X Size
-    
-    # Hide Automation Flags
-    opts.add_argument("--disable-blink-features=AutomationControlled")
-    opts.add_experimental_option("excludeSwitches", ["enable-automation"])
-    opts.add_experimental_option("useAutomationExtension", False)
-    
-    # Use User Agent directly
-    opts.add_argument("user-agent=Mozilla/5.0 (Linux; Android 11; Pixel 5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.91 Mobile Safari/537.36")
-    
-    if os.environ.get("CHROME_BIN"): opts.binary_location = os.environ.get("CHROME_BIN")
-    
-    driver = webdriver.Chrome(options=opts)
-    
-    # Activate Stealth
-    stealth(driver,
-        languages=["en-US", "en"],
-        vendor="Google Inc.",
-        platform="Linux aarch64",
-        webgl_vendor="Intel Inc.",
-        renderer="Intel Iris OpenGL Engine",
-        fix_hairline=True,
-    )
-    
-    driver.set_page_load_timeout(60)
-    return driver
-
-# --- SAFE INTERACTION (The Fix) ---
-def safe_click(driver, element):
-    """
-    Clicks using JavaScript. Impossible to be 'out of bounds'.
-    """
+def send_to_telegram(image_path, caption):
+    """Send screenshot to Telegram"""
     try:
-        # 1. Scroll into view
-        driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", element)
-        time.sleep(0.5)
-        # 2. Click directly via JS engine
-        driver.execute_script("arguments[0].click();", element)
+        with open(image_path, 'rb') as photo:
+            url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendPhoto"
+            files = {'photo': photo}
+            data = {'chat_id': CHAT_ID, 'caption': caption}
+            response = requests.post(url, files=files, data=data, timeout=15)
+            if response.status_code == 200:
+                log_msg(f"✅ Sent: {caption[:50]}")
+                return True
+            else:
+                log_msg(f"❌ Telegram error: {response.status_code}")
+                return False
     except Exception as e:
-        print(f"   ⚠️ Safe Click failed: {e}")
+        log_msg(f"❌ Telegram failed: {str(e)[:50]}")
+        return False
 
-def safe_type(driver, element, text):
-    """
-    Clears and types text safely.
-    """
-    driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", element)
-    element.clear()
-    time.sleep(0.2)
-    element.send_keys(text)
-    time.sleep(0.5)
-
-# --- LOGIN LOGIC ---
-def perform_login(driver):
-    send_msg("🔑 Starting Safe Login...")
-    
+def count_green_pixels(image_path):
+    """Count green pixels in image"""
     try:
-        driver.get("https://flashsport.bet/en/auth/signin")
-        time.sleep(8)
+        img = Image.open(image_path).convert('RGB')
+        pixels = img.load()
+        width, height = img.size
         
-        # 1. Find Inputs
-        wait = WebDriverWait(driver, 15)
-        wait.until(EC.presence_of_element_located((By.TAG_NAME, "input")))
-        inputs = driver.find_elements(By.TAG_NAME, "input")
-        visible = [i for i in inputs if i.is_displayed()]
+        green_count = 0
         
-        if len(visible) < 2:
-            send_msg("❌ Could not find inputs.")
-            driver.save_screenshot("debug_no_input.png")
-            send_photo("debug_no_input.png")
-            return False
-            
-        phone_box = visible[0]
-        pass_box = visible[1]
+        # Sample pixels efficiently - every 3rd pixel (faster)
+        for x in range(0, width, 3):
+            for y in range(0, height, 3):
+                r, g, b = pixels[x, y]
+                
+                if g > 200 and r < 100 and b < 100:
+                    green_count += 1
         
-        # 2. Type Credentials
-        print("   -> Typing Phone...", flush=True)
-        safe_type(driver, phone_box, LOGIN_PHONE)
+        return green_count
         
-        print("   -> Typing Password...", flush=True)
-        safe_type(driver, pass_box, LOGIN_PASSWORD)
-        
-        # 3. Find Button (Case Insensitive)
-        print("   -> Hunting for Login Button...", flush=True)
-        time.sleep(1)
-        
-        # Try finding button by text content
-        login_btn = None
-        try:
-            login_btn = driver.find_element(By.XPATH, "//button[contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'log')]")
-        except:
-            # Fallback to submit type
-            try:
-                login_btn = driver.find_element(By.XPATH, "//button[@type='submit']")
-            except:
-                pass
+    except Exception as e:
+        log_msg(f"❌ Count error: {str(e)[:50]}")
+        return 0
 
-        if login_btn:
-            print("   -> Clicking Button via JS...", flush=True)
-            safe_click(driver, login_btn)
-        else:
-            print("   -> Button not found. Using Enter Key...", flush=True)
-            pass_box.send_keys(Keys.RETURN)
-            
-        # 4. Wait for Redirect
-        send_msg("⏳ Waiting 15s for login...")
-        time.sleep(15)
-        
-        if "auth" in driver.current_url:
-            send_msg("❌ Login Failed. Still on login page.")
-            driver.save_screenshot("login_fail.png")
-            send_photo("login_fail.png", "Login Failed Screen")
-            return False
-            
-        send_msg("✅ Login Successful!")
+def detect_green_flash(image_path):
+    """Detect single/few green numbers (50-300 pixels)"""
+    green_count = count_green_pixels(image_path)
+    
+    # Single/few numbers = 50-300 pixels
+    # Results (20 numbers) = 300+ pixels
+    if 50 < green_count < 300:
         return True
+    
+    return False
 
+def is_results_phase(image_path):
+    """Detect results phase (20 drawn numbers - 300+ green pixels)"""
+    green_count = count_green_pixels(image_path)
+    return green_count > 300
+
+def setup_chrome():
+    """Setup Chrome browser with better error handling"""
+    log_msg("🚀 Starting Chrome...")
+    
+    chrome_bin = None
+    chromedriver_bin = None
+    
+    try:
+        result = subprocess.run(['which', 'chromium'], capture_output=True, text=True, timeout=3)
+        chrome_bin = result.stdout.strip() if result.stdout else None
+    except:
+        pass
+    
+    try:
+        result = subprocess.run(['which', 'chromedriver'], capture_output=True, text=True, timeout=3)
+        chromedriver_bin = result.stdout.strip() if result.stdout else None
+    except:
+        pass
+    
+    options = Options()
+    options.add_argument("--headless=new")
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+    options.add_argument("--disable-gpu")
+    options.add_argument("--window-size=1920,1080")
+    options.add_argument("--disable-blink-features=AutomationControlled")
+    options.add_argument("--disable-extensions")
+    options.add_argument("--disable-plugins")
+    
+    if chrome_bin:
+        options.binary_location = chrome_bin
+    
+    try:
+        service = Service(executable_path=chromedriver_bin) if chromedriver_bin else None
+        driver = webdriver.Chrome(service=service, options=options) if service else webdriver.Chrome(options=options)
+        
+        stealth(driver, languages=["en-US"], vendor="Google Inc.", platform="Win32")
+        driver.set_page_load_timeout(30)
+        driver.set_script_timeout(30)
+        
+        log_msg("✅ Chrome ready")
+        return driver
     except Exception as e:
-        send_msg(f"❌ Login Error: {e}")
-        return False
+        log_msg(f"❌ Chrome setup failed: {str(e)[:50]}")
+        raise
 
-# --- MONITOR ---
-def monitor_game(driver):
-    send_msg("🔎 Loading Game Grid...")
-    driver.get(GAME_URL)
-    time.sleep(10)
-    
-    # Check if we got kicked back to login
-    if "Sign" in driver.title:
-        send_msg("❌ Redirected to Login. Retrying...")
-        return False
-
-    # Find the Keno Grid (1-80)
-    target_class = None
-    frames = driver.find_elements(By.TAG_NAME, "iframe")
-    
-    # 1. Check iframes
-    for frame in frames:
-        try:
-            driver.switch_to.default_content()
-            driver.switch_to.frame(frame)
-            if driver.find_elements(By.XPATH, "//*[text()='80']"):
-                # Found the grid! Let's get the class name
-                el = driver.find_element(By.XPATH, "//*[text()='80']")
-                target_class = el.get_attribute("class").split()[0]
-                print(f"✅ Found Grid in iframe! Class: {target_class}")
-                break
-        except: continue
-        
-    if not target_class:
-        send_msg("❌ Could not find Keno Grid (Numbers 1-80).")
-        driver.save_screenshot("no_grid.png")
-        send_photo("no_grid.png")
-        return False
-        
-    send_msg(f"✅ Bot Watching! Class: {target_class}")
-    
-    # 2. Watch Loop
-    last_alert = []
-    start_time = time.time()
-    
-    while time.time() - start_time < 1800: # 30 mins
-        # JavaScript to find flashing elements
-        script = f"""
-        var changed = [];
-        var els = document.getElementsByClassName('{target_class}');
-        for (var i=0; i<els.length; i++) {{
-            // If class name is longer than base, it has a modifier (active/green)
-            if (els[i].className.length > '{target_class}'.length + 2) {{
-                changed.push(els[i].innerText);
-            }}
-        }}
-        return changed;
-        """
-        try:
-            active = driver.execute_script(script)
-            if active:
-                active.sort()
-                if active != last_alert:
-                    clean = [n for n in active if n.strip().isdigit()]
-                    if clean:
-                        msg = f"⚡ FLASH: {', '.join(clean)}"
-                        print(msg, flush=True)
-                        send_msg(msg)
-                        last_alert = active
-        except:
-            return False
-        time.sleep(0.1)
-        
-    return True
-
-# --- MAIN ---
 def main():
-    threading.Thread(target=run_server, daemon=True).start()
-    send_msg("🚀 Bot Restarted (Safe Mode).")
+    log_msg("=" * 70)
+    log_msg("🟢 KENO BOT v3 - GREEN FLASH DETECTION (24/7)")
+    log_msg("=" * 70)
+    log_msg("🔴 TELEGRAM ALERTS ONLY - No database")
+    log_msg("🔴 Countdown Phase (60→0): Green flashes detected")
+    
+    session_retry = 0
     
     while True:
         driver = None
         try:
-            driver = setup_driver()
+            session_retry += 1
+            log_msg(f"📍 Session #{session_retry}")
             
-            if perform_login(driver):
-                monitor_game(driver)
+            # Setup browser
+            driver = setup_chrome()
+            
+            # Login
+            log_msg("🔐 Logging in...")
+            driver.get(BASE_URL)
+            time.sleep(1)
+            driver.add_cookie({
+                "name": "token",
+                "value": SESSION_TOKEN,
+                "domain": "flashsport.bet",
+                "path": "/"
+            })
+            log_msg("✅ Session ready")
+            
+            # Load game
+            log_msg("🎮 Loading game...")
+            driver.get(GAME_URL)
+            time.sleep(5)
+            
+            log_msg("⏱️  COUNTDOWN PHASE - Monitoring for green flashes")
+            
+            # Main monitoring loop
+            session_start = time.time()
+            flashes_detected = 0
+            status_sent = False
+            in_results_phase = False
+            
+            while (time.time() - session_start) < 1800:  # 30 min session
+                try:
+                    img_path = f"/tmp/keno_scan_{int(time.time() * 100)}.png"
+                    
+                    # Timeout for screenshot
+                    try:
+                        driver.save_screenshot(img_path)
+                    except Exception as e:
+                        log_msg(f"⚠️  Screenshot timeout: {str(e)[:30]}")
+                        time.sleep(1)
+                        continue
+                    
+                    # Check current phase
+                    is_results = is_results_phase(img_path)
+                    
+                    if is_results:
+                        # Results phase (IGNORE)
+                        if not in_results_phase:
+                            log_msg("⏸️  RESULTS PHASE (Top 20 - No alerts)")
+                            in_results_phase = True
+                    else:
+                        # Countdown phase (DETECT)
+                        if in_results_phase:
+                            log_msg("⏱️  COUNTDOWN PHASE RESUMED")
+                            in_results_phase = False
+                        
+                        # Check for green flash
+                        if detect_green_flash(img_path):
+                            flashes_detected += 1
+                            
+                            # ALERT
+                            alert_caption = f"🟢 GREEN FLASH #{flashes_detected} | Time: {eth_time()}"
+                            if send_to_telegram(img_path, alert_caption):
+                                log_msg(f"🚨 GREEN FLASH #{flashes_detected} DETECTED & SENT!")
+                            
+                            time.sleep(0.5)
+                    
+                    # STATUS UPDATE EVERY 2 HOURS
+                    elapsed = time.time() - session_start
+                    if elapsed > 7200 and not status_sent:
+                        try:
+                            status_img = f"/tmp/keno_status_{int(time.time())}.png"
+                            driver.save_screenshot(status_img)
+                            caption = f"✅ BOT ALIVE | Flashes: {flashes_detected} | Time: {eth_time()}"
+                            if send_to_telegram(status_img, caption):
+                                log_msg(f"📸 Status sent: {flashes_detected} flashes in 2 hours")
+                            status_sent = True
+                        except Exception as e:
+                            log_msg(f"❌ Status error: {str(e)[:50]}")
+                    
+                    time.sleep(1)
+                    
+                except Exception as e:
+                    log_msg(f"⚠️  Scan error: {str(e)[:50]}")
+                    time.sleep(1)
+            
+            log_msg(f"✅ Session #{session_retry} complete - {flashes_detected} flashes")
             
         except Exception as e:
-            print(f"Crash: {e}")
+            log_msg(f"❌ Session error: {str(e)[:50]}")
+        
         finally:
-            if driver: driver.quit()
-            print("Restarting...", flush=True)
+            if driver:
+                try:
+                    driver.quit()
+                except:
+                    pass
+            
+            log_msg("⏳ Restarting in 10 seconds...")
             time.sleep(10)
 
 if __name__ == "__main__":
