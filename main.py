@@ -4,6 +4,7 @@ import os
 import sys
 import threading
 import random
+import math
 from flask import Flask
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
@@ -41,19 +42,18 @@ def send_photo(filename, caption=""):
                 requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendPhoto", data={"chat_id": CHAT_ID, "caption": caption}, files={"photo": f})
         except: pass
 
-# --- BROWSER SETUP (DESKTOP MODE) ---
+# --- BROWSER SETUP (High Trust Desktop) ---
 def setup_driver():
-    print("   -> Launching Chrome (Desktop Windows Mode)...", flush=True)
+    print("   -> Launching Chrome (Physics Mode)...", flush=True)
     opts = Options()
     opts.add_argument("--headless=new") 
     opts.add_argument("--no-sandbox")
     opts.add_argument("--disable-dev-shm-usage")
     opts.add_argument("--disable-gpu")
-    
-    # DESKTOP RESOLUTION (Crucial for Trust)
     opts.add_argument("--window-size=1920,1080")
+    opts.add_argument("--lang=en-US")
     
-    # REMOVE AUTOMATION FLAGS
+    # CRITICAL: HIDE AUTOMATION
     opts.add_argument("--disable-blink-features=AutomationControlled")
     opts.add_experimental_option("excludeSwitches", ["enable-automation"])
     opts.add_experimental_option("useAutomationExtension", False)
@@ -62,7 +62,7 @@ def setup_driver():
     
     driver = webdriver.Chrome(options=opts)
     
-    # STEALTH SETTINGS FOR WINDOWS
+    # STEALTH OVERLAY
     stealth(driver,
         languages=["en-US", "en"],
         vendor="Google Inc.",
@@ -72,34 +72,63 @@ def setup_driver():
         fix_hairline=True,
     )
     
-    driver.set_page_load_timeout(60)
     return driver
 
-# --- HUMAN TYPING ---
+# --- HUMAN PHYSICS ENGINE ---
+def human_mouse_move(driver, element=None):
+    """Moves mouse in a non-linear human curve"""
+    action = ActionChains(driver)
+    
+    # If no target, move to random spot
+    if element:
+        driver.execute_script("arguments[0].scrollIntoView({block: 'center', behavior: 'smooth'});", element)
+        time.sleep(random.uniform(0.5, 1.0))
+        action.move_to_element(element)
+    else:
+        # Jiggle in place
+        action.move_by_offset(random.randint(-10, 10), random.randint(-10, 10))
+    
+    action.perform()
+    time.sleep(random.uniform(0.2, 0.7))
+
+def build_trust_score(driver):
+    """Performs random actions to trick ReCaptcha v3"""
+    send_msg("⏳ Building ReCaptcha Trust Score (20s)...")
+    
+    # 1. Random Scrolls
+    for _ in range(3):
+        driver.execute_script(f"window.scrollBy(0, {random.randint(100, 500)});")
+        time.sleep(random.uniform(1, 3))
+        human_mouse_move(driver) # Jiggle mouse
+        driver.execute_script(f"window.scrollBy(0, {random.randint(-200, -50)});")
+        time.sleep(random.uniform(1, 3))
+    
+    send_msg("   -> Trust building complete.")
+
 def slow_type(driver, element, text):
+    human_mouse_move(driver, element)
+    element.click()
+    time.sleep(0.5)
+    element.clear()
+    
     for char in text:
         element.send_keys(char)
-        time.sleep(random.uniform(0.1, 0.3)) # Human typing speed
+        time.sleep(random.uniform(0.1, 0.35)) # Variable typing speed
+    
+    time.sleep(0.5)
 
 # --- LOGIN LOGIC ---
 def perform_login(driver):
-    send_msg("🔑 Starting Login Process (Desktop Mode)...")
+    send_msg("🔑 Starting Physics-Based Login...")
     
     try:
-        # 1. Load Page
+        # 1. Load Page & Build Trust
         driver.get("https://flashsport.bet/en/auth/signin")
         
-        # 2. THE TOKEN REFRESH TRICK
-        # We wait 5 seconds, then REFRESH. This gives us a fresh ReCaptcha token.
-        send_msg("⏳ Warming up ReCaptcha (5s)...")
-        time.sleep(5)
-        print("   -> Refreshing page to generate valid token...", flush=True)
-        driver.refresh()
-        time.sleep(8) # Wait for page + ReCaptcha to load fully
+        # DO NOT TYPE YET. WAIT AND ACT HUMAN.
+        build_trust_score(driver)
         
-        debug_shot(driver, "1_desktop_login.png")
-        
-        # 3. Find Inputs
+        # 2. Find Inputs
         inputs = driver.find_elements(By.TAG_NAME, "input")
         visible = [i for i in inputs if i.is_displayed()]
         
@@ -110,48 +139,46 @@ def perform_login(driver):
         phone_box = visible[0]
         pass_box = visible[1]
         
-        # 4. Type Credentials
+        # 3. Type Phone (Humanly)
         print("   -> Typing Phone...", flush=True)
-        phone_box.click()
-        phone_box.clear()
         slow_type(driver, phone_box, LOGIN_PHONE)
-        time.sleep(1)
         
+        # 4. Type Password (Humanly)
         print("   -> Typing Password...", flush=True)
-        pass_box.click()
-        pass_box.clear()
         slow_type(driver, pass_box, LOGIN_PASSWORD)
-        time.sleep(2)
         
-        # 5. MOUSE MOVEMENT + CLICK
-        # We need to simulate mouse movement to prove we aren't a robot
-        print("   -> Moving mouse to button...", flush=True)
+        # 5. Wait again for ReCaptcha to process the typing
+        time.sleep(3)
         
-        # Find button (Desktop layout might be slightly different, looking for text)
-        xpath = "//button[contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'log')]"
+        # 6. Find & Click Button
+        print("   -> Targeting Login Button...", flush=True)
+        
+        # Locate the button that is AFTER the password box
         try:
-            login_btn = driver.find_element(By.XPATH, xpath)
+            login_btn = driver.find_element(By.XPATH, "//input[@type='password']/following::button[contains(., 'LOGIN')]")
         except:
             login_btn = driver.find_element(By.XPATH, "//button[@type='submit']")
 
-        # Move mouse over the button, wait, then click
-        actions = ActionChains(driver)
-        actions.move_to_element(login_btn)
-        actions.pause(1)
-        actions.click()
-        actions.perform()
-        
-        print("   -> Clicked Login.", flush=True)
+        if login_btn:
+            # Move mouse to button first
+            human_mouse_move(driver, login_btn)
+            time.sleep(0.5)
             
-        # 6. Wait for Result
-        send_msg("⏳ Waiting 15s for redirection...")
+            # Click
+            print("   -> CLICKING...", flush=True)
+            login_btn.click()
+        else:
+            print("   -> Button missing, using Enter...", flush=True)
+            pass_box.send_keys(Keys.RETURN)
+            
+        # 7. Wait for Result
+        send_msg("⏳ Waiting 15s for result...")
         time.sleep(15)
-        debug_shot(driver, "2_result.png")
+        debug_shot(driver, "2_login_result.png")
         
-        # Check for error text
         body = driver.find_element(By.TAG_NAME, "body").text
         if "TOKEN error" in body:
-            send_msg("❌ ReCaptcha still failed. Render IP is likely blacklisted.")
+            send_msg("❌ ReCaptcha rejected us. Wait 2 mins and I will retry.")
             return False
         
         if "auth" in driver.current_url:
@@ -179,9 +206,8 @@ def monitor_game(driver):
     send_msg("✅ Bot Connected! Watching now...")
     
     start_time = time.time()
-    while time.time() - start_time < 1800: # Restart every 30 mins
+    while time.time() - start_time < 1800:
         time.sleep(5)
-            
     return True
 
 # --- HELPER ---
