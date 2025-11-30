@@ -3,6 +3,7 @@ import requests
 import os
 import sys
 import threading
+import random
 from flask import Flask
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
@@ -40,23 +41,19 @@ def send_photo(filename, caption=""):
                 requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendPhoto", data={"chat_id": CHAT_ID, "caption": caption}, files={"photo": f})
         except: pass
 
-# --- BROWSER SETUP ---
+# --- BROWSER SETUP (DESKTOP MODE) ---
 def setup_driver():
-    print("   -> Launching Chrome (Pixel 5 Emulation)...", flush=True)
+    print("   -> Launching Chrome (Desktop Windows Mode)...", flush=True)
     opts = Options()
     opts.add_argument("--headless=new") 
     opts.add_argument("--no-sandbox")
     opts.add_argument("--disable-dev-shm-usage")
     opts.add_argument("--disable-gpu")
     
-    # EMULATE PIXEL 5
-    mobile_emulation = {
-        "deviceMetrics": { "width": 393, "height": 851, "pixelRatio": 3.0 },
-        "userAgent": "Mozilla/5.0 (Linux; Android 11; Pixel 5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.91 Mobile Safari/537.36"
-    }
-    opts.add_experimental_option("mobileEmulation", mobile_emulation)
+    # DESKTOP RESOLUTION (Crucial for Trust)
+    opts.add_argument("--window-size=1920,1080")
     
-    # STEALTH
+    # REMOVE AUTOMATION FLAGS
     opts.add_argument("--disable-blink-features=AutomationControlled")
     opts.add_experimental_option("excludeSwitches", ["enable-automation"])
     opts.add_experimental_option("useAutomationExtension", False)
@@ -65,6 +62,7 @@ def setup_driver():
     
     driver = webdriver.Chrome(options=opts)
     
+    # STEALTH SETTINGS FOR WINDOWS
     stealth(driver,
         languages=["en-US", "en"],
         vendor="Google Inc.",
@@ -77,90 +75,88 @@ def setup_driver():
     driver.set_page_load_timeout(60)
     return driver
 
-# --- HELPER: DEBUG SCREENSHOT ---
-def debug_shot(driver, name):
-    driver.save_screenshot(name)
-    send_photo(name, f"Debug: {name}")
+# --- HUMAN TYPING ---
+def slow_type(driver, element, text):
+    for char in text:
+        element.send_keys(char)
+        time.sleep(random.uniform(0.1, 0.3)) # Human typing speed
 
 # --- LOGIN LOGIC ---
 def perform_login(driver):
-    send_msg("🔑 Starting Login Process...")
+    send_msg("🔑 Starting Login Process (Desktop Mode)...")
     
     try:
         # 1. Load Page
         driver.get("https://flashsport.bet/en/auth/signin")
-        time.sleep(10)
         
-        # 2. Find Inputs
+        # 2. THE TOKEN REFRESH TRICK
+        # We wait 5 seconds, then REFRESH. This gives us a fresh ReCaptcha token.
+        send_msg("⏳ Warming up ReCaptcha (5s)...")
+        time.sleep(5)
+        print("   -> Refreshing page to generate valid token...", flush=True)
+        driver.refresh()
+        time.sleep(8) # Wait for page + ReCaptcha to load fully
+        
+        debug_shot(driver, "1_desktop_login.png")
+        
+        # 3. Find Inputs
         inputs = driver.find_elements(By.TAG_NAME, "input")
         visible = [i for i in inputs if i.is_displayed()]
         
         if len(visible) < 2:
             send_msg("❌ Inputs not found!")
-            debug_shot(driver, "error_no_inputs.png")
             return False
             
         phone_box = visible[0]
         pass_box = visible[1]
         
-        # 3. Type Credentials
+        # 4. Type Credentials
         print("   -> Typing Phone...", flush=True)
         phone_box.click()
         phone_box.clear()
-        phone_box.send_keys(LOGIN_PHONE)
+        slow_type(driver, phone_box, LOGIN_PHONE)
         time.sleep(1)
         
         print("   -> Typing Password...", flush=True)
         pass_box.click()
         pass_box.clear()
-        pass_box.send_keys(LOGIN_PASSWORD)
-        time.sleep(1)
+        slow_type(driver, pass_box, LOGIN_PASSWORD)
+        time.sleep(2)
         
-        debug_shot(driver, "2_filled_form.png")
+        # 5. MOUSE MOVEMENT + CLICK
+        # We need to simulate mouse movement to prove we aren't a robot
+        print("   -> Moving mouse to button...", flush=True)
         
-        # 4. FIND THE CORRECT BUTTON
-        print("   -> Locating the BIG Yellow Button...", flush=True)
-        
-        # Strategy: Find the button that is physically located AFTER the password box
-        # This prevents clicking the header button by mistake
+        # Find button (Desktop layout might be slightly different, looking for text)
+        xpath = "//button[contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'log')]"
         try:
-            login_btn = driver.find_element(By.XPATH, "//input[@type='password']/following::button[contains(., 'LOGIN')]")
+            login_btn = driver.find_element(By.XPATH, xpath)
         except:
-            # Fallback: Find the button with type='submit'
-            try:
-                login_btn = driver.find_element(By.XPATH, "//button[@type='submit']")
-            except:
-                login_btn = None
+            login_btn = driver.find_element(By.XPATH, "//button[@type='submit']")
 
-        if login_btn:
-            print("   -> Button Found! Force Clicking via JS...", flush=True)
-            
-            # Scroll to it
-            driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", login_btn)
-            time.sleep(1)
-            
-            # FORCE CLICK (JavaScript) - This works even if overlay/chat bubble is blocking it
-            driver.execute_script("arguments[0].click();", login_btn)
-        else:
-            print("   -> Button NOT found. Using Enter Key fallback...", flush=True)
-            pass_box.send_keys(Keys.RETURN)
+        # Move mouse over the button, wait, then click
+        actions = ActionChains(driver)
+        actions.move_to_element(login_btn)
+        actions.pause(1)
+        actions.click()
+        actions.perform()
+        
+        print("   -> Clicked Login.", flush=True)
             
         # 6. Wait for Result
         send_msg("⏳ Waiting 15s for redirection...")
         time.sleep(15)
-        debug_shot(driver, "3_after_click.png")
+        debug_shot(driver, "2_result.png")
+        
+        # Check for error text
+        body = driver.find_element(By.TAG_NAME, "body").text
+        if "TOKEN error" in body:
+            send_msg("❌ ReCaptcha still failed. Render IP is likely blacklisted.")
+            return False
         
         if "auth" in driver.current_url:
-            send_msg("❌ Still on login page. Trying One More Click...")
-            # Emergency Retry Click
-            try:
-                login_btn = driver.find_element(By.XPATH, "//button[contains(text(), 'LOGIN')]")
-                driver.execute_script("arguments[0].click();", login_btn)
-                time.sleep(10)
-            except: pass
-            
-            if "auth" in driver.current_url:
-                return False
+            send_msg("❌ Still on login page.")
+            return False
             
         send_msg("✅ Login Successful!")
         return True
@@ -174,7 +170,7 @@ def monitor_game(driver):
     send_msg("🔎 Loading Game...")
     driver.get(GAME_URL)
     time.sleep(15)
-    debug_shot(driver, "4_game_loaded.png")
+    debug_shot(driver, "3_game_loaded.png")
     
     if "Sign" in driver.title:
         send_msg("❌ Game redirected to Login.")
@@ -187,6 +183,11 @@ def monitor_game(driver):
         time.sleep(5)
             
     return True
+
+# --- HELPER ---
+def debug_shot(driver, name):
+    driver.save_screenshot(name)
+    send_photo(name, f"Debug: {name}")
 
 # --- MAIN ---
 def main():
