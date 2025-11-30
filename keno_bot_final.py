@@ -268,6 +268,8 @@ def monitor_game():
             bot_state["flashes_detected"] = 0
             status_sent = False
             in_results_phase = False
+            last_status_log = time.time()
+            scan_count = 0
             
             while (time.time() - bot_state["session_start"]) < 1800:
                 try:
@@ -280,6 +282,7 @@ def monitor_game():
                         time.sleep(1)
                         continue
                     
+                    scan_count += 1
                     is_results = is_results_phase(img_path)
                     
                     if is_results:
@@ -301,6 +304,11 @@ def monitor_game():
                             time.sleep(0.5)
                     
                     elapsed = time.time() - bot_state["session_start"]
+                    
+                    if time.time() - last_status_log > 30:
+                        log_msg(f"✅ MONITORING ACTIVE | Scans: {scan_count} | Flashes: {bot_state['flashes_detected']} | Time: {eth_time()}")
+                        last_status_log = time.time()
+                    
                     if elapsed > 7200 and not status_sent:
                         try:
                             status_img = f"/tmp/keno_status_{int(time.time())}.png"
