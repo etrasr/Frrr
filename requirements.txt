@@ -1,6 +1,4 @@
-selenium
-requests
-selenium-stealth
-flask
-gunicorn
-webdriver-manager
+selenium==4.15.0
+selenium-stealth==1.0.1
+pillow==10.0.0
+requests==2.31.0
