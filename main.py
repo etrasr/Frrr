@@ -3,15 +3,14 @@ import requests
 import os
 import sys
 import threading
-import random
-import math
 from flask import Flask
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
-from selenium.webdriver.common.action_chains import ActionChains
 from selenium_stealth import stealth
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
 
 # --- CONFIGURATION ---
 sys.stdout.reconfigure(line_buffering=True)
@@ -42,183 +41,208 @@ def send_photo(filename, caption=""):
                 requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendPhoto", data={"chat_id": CHAT_ID, "caption": caption}, files={"photo": f})
         except: pass
 
-# --- BROWSER SETUP (High Trust Desktop) ---
+# --- BROWSER SETUP ---
 def setup_driver():
-    print("   -> Launching Chrome (Physics Mode)...", flush=True)
+    print("   -> Launching Chrome...", flush=True)
     opts = Options()
     opts.add_argument("--headless=new") 
     opts.add_argument("--no-sandbox")
     opts.add_argument("--disable-dev-shm-usage")
     opts.add_argument("--disable-gpu")
-    opts.add_argument("--window-size=1920,1080")
-    opts.add_argument("--lang=en-US")
+    opts.add_argument("--window-size=375,812") # iPhone X Size
     
-    # CRITICAL: HIDE AUTOMATION
+    # Hide Automation Flags
     opts.add_argument("--disable-blink-features=AutomationControlled")
     opts.add_experimental_option("excludeSwitches", ["enable-automation"])
     opts.add_experimental_option("useAutomationExtension", False)
+    
+    # Use User Agent directly
+    opts.add_argument("user-agent=Mozilla/5.0 (Linux; Android 11; Pixel 5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.91 Mobile Safari/537.36")
     
     if os.environ.get("CHROME_BIN"): opts.binary_location = os.environ.get("CHROME_BIN")
     
     driver = webdriver.Chrome(options=opts)
     
-    # STEALTH OVERLAY
+    # Activate Stealth
     stealth(driver,
         languages=["en-US", "en"],
         vendor="Google Inc.",
-        platform="Win32",
+        platform="Linux aarch64",
         webgl_vendor="Intel Inc.",
         renderer="Intel Iris OpenGL Engine",
         fix_hairline=True,
     )
     
+    driver.set_page_load_timeout(60)
     return driver
 
-# --- HUMAN PHYSICS ENGINE ---
-def human_mouse_move(driver, element=None):
-    """Moves mouse in a non-linear human curve"""
-    action = ActionChains(driver)
-    
-    # If no target, move to random spot
-    if element:
-        driver.execute_script("arguments[0].scrollIntoView({block: 'center', behavior: 'smooth'});", element)
-        time.sleep(random.uniform(0.5, 1.0))
-        action.move_to_element(element)
-    else:
-        # Jiggle in place
-        action.move_by_offset(random.randint(-10, 10), random.randint(-10, 10))
-    
-    action.perform()
-    time.sleep(random.uniform(0.2, 0.7))
+# --- SAFE INTERACTION (The Fix) ---
+def safe_click(driver, element):
+    """
+    Clicks using JavaScript. Impossible to be 'out of bounds'.
+    """
+    try:
+        # 1. Scroll into view
+        driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", element)
+        time.sleep(0.5)
+        # 2. Click directly via JS engine
+        driver.execute_script("arguments[0].click();", element)
+    except Exception as e:
+        print(f"   ⚠️ Safe Click failed: {e}")
 
-def build_trust_score(driver):
-    """Performs random actions to trick ReCaptcha v3"""
-    send_msg("⏳ Building ReCaptcha Trust Score (20s)...")
-    
-    # 1. Random Scrolls
-    for _ in range(3):
-        driver.execute_script(f"window.scrollBy(0, {random.randint(100, 500)});")
-        time.sleep(random.uniform(1, 3))
-        human_mouse_move(driver) # Jiggle mouse
-        driver.execute_script(f"window.scrollBy(0, {random.randint(-200, -50)});")
-        time.sleep(random.uniform(1, 3))
-    
-    send_msg("   -> Trust building complete.")
-
-def slow_type(driver, element, text):
-    human_mouse_move(driver, element)
-    element.click()
-    time.sleep(0.5)
+def safe_type(driver, element, text):
+    """
+    Clears and types text safely.
+    """
+    driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", element)
     element.clear()
-    
-    for char in text:
-        element.send_keys(char)
-        time.sleep(random.uniform(0.1, 0.35)) # Variable typing speed
-    
+    time.sleep(0.2)
+    element.send_keys(text)
     time.sleep(0.5)
 
 # --- LOGIN LOGIC ---
 def perform_login(driver):
-    send_msg("🔑 Starting Physics-Based Login...")
+    send_msg("🔑 Starting Safe Login...")
     
     try:
-        # 1. Load Page & Build Trust
         driver.get("https://flashsport.bet/en/auth/signin")
+        time.sleep(8)
         
-        # DO NOT TYPE YET. WAIT AND ACT HUMAN.
-        build_trust_score(driver)
-        
-        # 2. Find Inputs
+        # 1. Find Inputs
+        wait = WebDriverWait(driver, 15)
+        wait.until(EC.presence_of_element_located((By.TAG_NAME, "input")))
         inputs = driver.find_elements(By.TAG_NAME, "input")
         visible = [i for i in inputs if i.is_displayed()]
         
         if len(visible) < 2:
-            send_msg("❌ Inputs not found!")
+            send_msg("❌ Could not find inputs.")
+            driver.save_screenshot("debug_no_input.png")
+            send_photo("debug_no_input.png")
             return False
             
         phone_box = visible[0]
         pass_box = visible[1]
         
-        # 3. Type Phone (Humanly)
+        # 2. Type Credentials
         print("   -> Typing Phone...", flush=True)
-        slow_type(driver, phone_box, LOGIN_PHONE)
+        safe_type(driver, phone_box, LOGIN_PHONE)
         
-        # 4. Type Password (Humanly)
         print("   -> Typing Password...", flush=True)
-        slow_type(driver, pass_box, LOGIN_PASSWORD)
+        safe_type(driver, pass_box, LOGIN_PASSWORD)
         
-        # 5. Wait again for ReCaptcha to process the typing
-        time.sleep(3)
+        # 3. Find Button (Case Insensitive)
+        print("   -> Hunting for Login Button...", flush=True)
+        time.sleep(1)
         
-        # 6. Find & Click Button
-        print("   -> Targeting Login Button...", flush=True)
-        
-        # Locate the button that is AFTER the password box
+        # Try finding button by text content
+        login_btn = None
         try:
-            login_btn = driver.find_element(By.XPATH, "//input[@type='password']/following::button[contains(., 'LOGIN')]")
+            login_btn = driver.find_element(By.XPATH, "//button[contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'log')]")
         except:
-            login_btn = driver.find_element(By.XPATH, "//button[@type='submit']")
+            # Fallback to submit type
+            try:
+                login_btn = driver.find_element(By.XPATH, "//button[@type='submit']")
+            except:
+                pass
 
         if login_btn:
-            # Move mouse to button first
-            human_mouse_move(driver, login_btn)
-            time.sleep(0.5)
-            
-            # Click
-            print("   -> CLICKING...", flush=True)
-            login_btn.click()
+            print("   -> Clicking Button via JS...", flush=True)
+            safe_click(driver, login_btn)
         else:
-            print("   -> Button missing, using Enter...", flush=True)
+            print("   -> Button not found. Using Enter Key...", flush=True)
             pass_box.send_keys(Keys.RETURN)
             
-        # 7. Wait for Result
-        send_msg("⏳ Waiting 15s for result...")
+        # 4. Wait for Redirect
+        send_msg("⏳ Waiting 15s for login...")
         time.sleep(15)
-        debug_shot(driver, "2_login_result.png")
-        
-        body = driver.find_element(By.TAG_NAME, "body").text
-        if "TOKEN error" in body:
-            send_msg("❌ ReCaptcha rejected us. Wait 2 mins and I will retry.")
-            return False
         
         if "auth" in driver.current_url:
-            send_msg("❌ Still on login page.")
+            send_msg("❌ Login Failed. Still on login page.")
+            driver.save_screenshot("login_fail.png")
+            send_photo("login_fail.png", "Login Failed Screen")
             return False
             
         send_msg("✅ Login Successful!")
         return True
 
     except Exception as e:
-        send_msg(f"❌ Error: {e}")
+        send_msg(f"❌ Login Error: {e}")
         return False
 
 # --- MONITOR ---
 def monitor_game(driver):
-    send_msg("🔎 Loading Game...")
+    send_msg("🔎 Loading Game Grid...")
     driver.get(GAME_URL)
-    time.sleep(15)
-    debug_shot(driver, "3_game_loaded.png")
+    time.sleep(10)
     
+    # Check if we got kicked back to login
     if "Sign" in driver.title:
-        send_msg("❌ Game redirected to Login.")
+        send_msg("❌ Redirected to Login. Retrying...")
         return False
 
-    send_msg("✅ Bot Connected! Watching now...")
+    # Find the Keno Grid (1-80)
+    target_class = None
+    frames = driver.find_elements(By.TAG_NAME, "iframe")
     
+    # 1. Check iframes
+    for frame in frames:
+        try:
+            driver.switch_to.default_content()
+            driver.switch_to.frame(frame)
+            if driver.find_elements(By.XPATH, "//*[text()='80']"):
+                # Found the grid! Let's get the class name
+                el = driver.find_element(By.XPATH, "//*[text()='80']")
+                target_class = el.get_attribute("class").split()[0]
+                print(f"✅ Found Grid in iframe! Class: {target_class}")
+                break
+        except: continue
+        
+    if not target_class:
+        send_msg("❌ Could not find Keno Grid (Numbers 1-80).")
+        driver.save_screenshot("no_grid.png")
+        send_photo("no_grid.png")
+        return False
+        
+    send_msg(f"✅ Bot Watching! Class: {target_class}")
+    
+    # 2. Watch Loop
+    last_alert = []
     start_time = time.time()
-    while time.time() - start_time < 1800:
-        time.sleep(5)
+    
+    while time.time() - start_time < 1800: # 30 mins
+        # JavaScript to find flashing elements
+        script = f"""
+        var changed = [];
+        var els = document.getElementsByClassName('{target_class}');
+        for (var i=0; i<els.length; i++) {{
+            // If class name is longer than base, it has a modifier (active/green)
+            if (els[i].className.length > '{target_class}'.length + 2) {{
+                changed.push(els[i].innerText);
+            }}
+        }}
+        return changed;
+        """
+        try:
+            active = driver.execute_script(script)
+            if active:
+                active.sort()
+                if active != last_alert:
+                    clean = [n for n in active if n.strip().isdigit()]
+                    if clean:
+                        msg = f"⚡ FLASH: {', '.join(clean)}"
+                        print(msg, flush=True)
+                        send_msg(msg)
+                        last_alert = active
+        except:
+            return False
+        time.sleep(0.1)
+        
     return True
-
-# --- HELPER ---
-def debug_shot(driver, name):
-    driver.save_screenshot(name)
-    send_photo(name, f"Debug: {name}")
 
 # --- MAIN ---
 def main():
     threading.Thread(target=run_server, daemon=True).start()
-    send_msg("🚀 Bot Restarted.")
+    send_msg("🚀 Bot Restarted (Safe Mode).")
     
     while True:
         driver = None
