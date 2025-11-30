@@ -1,29 +1,21 @@
-# 1. Use Python 3.9 Slim
-FROM python:3.9-slim
+FROM python:3.11-slim
 
-# 2. Install tools needed to download files
+# Install Chrome and dependencies
 RUN apt-get update && apt-get install -y \
+    chromium-browser \
+    chromium-driver \
     wget \
-    unzip \
     && rm -rf /var/lib/apt/lists/*
 
-# 3. Download and Install Google Chrome directly (No keys needed)
-RUN wget https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
-RUN apt-get update && apt-get install -y ./google-chrome-stable_current_amd64.deb
-RUN rm google-chrome-stable_current_amd64.deb
-
-# 4. Tell the bot where Chrome is
-ENV CHROME_BIN=/usr/bin/google-chrome
-
-# 5. Setup Project
+# Set working directory
 WORKDIR /app
 
-# 6. Copy files
+# Copy files
 COPY requirements.txt .
-COPY main.py .
+COPY keno_bot_final.py .
 
-# 7. Install Python libraries
+# Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-# 8. Start
-CMD ["python", "main.py"]
+# Run bot
+CMD ["python", "keno_bot_final.py"]
