@@ -209,28 +209,37 @@ def handle_telegram_commands():
             time.sleep(5)
 
 class HealthCheckHandler(BaseHTTPRequestHandler):
+    """Simple HTTP handler for health checks"""
     
     def do_GET(self):
-        if self.path == '/':
+        if self.path == '/' or self.path == '/health':
             self.send_response(200)
             self.send_header('Content-type', 'text/plain')
             self.end_headers()
-            self.wfile.write(b'KENO BOT v5 - RUNNING\n')
+            elapsed_time = (time.time() - bot_state["session_start"]) / 60 if bot_state["session_start"] else 0
+            health_msg = f'KENO BOT v5 RUNNING - Status: Active | Flashes: {bot_state["flashes_detected"]} | Uptime: {int(elapsed_time)}min\n'
+            self.wfile.write(health_msg.encode())
         else:
             self.send_response(404)
             self.end_headers()
     
-    def log_message(self, format_string, *args):
+    def log_message(self, format, *args):
         pass
 
 def start_web_server():
+    """Start simple web server on port 10000 for Render health checks"""
     log_msg("🌐 Starting web server on port 10000...")
-    server = HTTPServer(('0.0.0.0', 10000), HealthCheckHandler)
-    server_thread = threading.Thread(target=server.serve_forever, daemon=True)
-    server_thread.start()
-    log_msg("✅ Web server running on port 10000")
+    try:
+        server = HTTPServer(('0.0.0.0', 10000), HealthCheckHandler)
+        server_thread = threading.Thread(target=server.serve_forever, daemon=True)
+        server_thread.daemon = True
+        server_thread.start()
+        log_msg("✅ Web server running on port 10000 - Uptime Robot check /health")
+    except Exception as e:
+        log_msg(f"⚠️ Web server error: {str(e)[:50]}")
 
 def monitor_game():
+    """Main game monitoring loop"""
     log_msg("=" * 70)
     log_msg("🟢 KENO BOT v5 - GREEN FLASH DETECTION + TELEGRAM COMMANDS")
     log_msg("=" * 70)
@@ -271,7 +280,7 @@ def monitor_game():
             last_status_log = time.time()
             scan_count = 0
             
-            while (time.time() - bot_state["session_start"]) < 1800:
+            while (time.time() - bot_state["session_start"]) < 10800:
                 try:
                     img_path = f"/tmp/keno_scan_{int(time.time() * 100)}.png"
                     
