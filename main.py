@@ -40,7 +40,7 @@ def send_photo(filename, caption=""):
                 requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendPhoto", data={"chat_id": CHAT_ID, "caption": caption}, files={"photo": f})
         except: pass
 
-# --- FULL MOBILE EMULATION ---
+# --- BROWSER SETUP ---
 def setup_driver():
     print("   -> Launching Chrome (Pixel 5 Emulation)...", flush=True)
     opts = Options()
@@ -49,7 +49,7 @@ def setup_driver():
     opts.add_argument("--disable-dev-shm-usage")
     opts.add_argument("--disable-gpu")
     
-    # EMULATE PIXEL 5 (Crucial for ReCaptcha trust)
+    # EMULATE PIXEL 5
     mobile_emulation = {
         "deviceMetrics": { "width": 393, "height": 851, "pixelRatio": 3.0 },
         "userAgent": "Mozilla/5.0 (Linux; Android 11; Pixel 5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.91 Mobile Safari/537.36"
@@ -77,11 +77,7 @@ def setup_driver():
     driver.set_page_load_timeout(60)
     return driver
 
-# --- HELPER: CLICK & SCREENSHOT ---
-def touch_click(driver, element):
-    # Simulates a finger tap
-    ActionChains(driver).move_to_element(element).click().perform()
-
+# --- HELPER: DEBUG SCREENSHOT ---
 def debug_shot(driver, name):
     driver.save_screenshot(name)
     send_photo(name, f"Debug: {name}")
@@ -94,7 +90,6 @@ def perform_login(driver):
         # 1. Load Page
         driver.get("https://flashsport.bet/en/auth/signin")
         time.sleep(10)
-        debug_shot(driver, "1_login_page.png")
         
         # 2. Find Inputs
         inputs = driver.find_elements(By.TAG_NAME, "input")
@@ -102,6 +97,7 @@ def perform_login(driver):
         
         if len(visible) < 2:
             send_msg("❌ Inputs not found!")
+            debug_shot(driver, "error_no_inputs.png")
             return False
             
         phone_box = visible[0]
@@ -109,42 +105,44 @@ def perform_login(driver):
         
         # 3. Type Credentials
         print("   -> Typing Phone...", flush=True)
-        touch_click(driver, phone_box)
+        phone_box.click()
         phone_box.clear()
         phone_box.send_keys(LOGIN_PHONE)
         time.sleep(1)
         
         print("   -> Typing Password...", flush=True)
-        touch_click(driver, pass_box)
+        pass_box.click()
         pass_box.clear()
         pass_box.send_keys(LOGIN_PASSWORD)
         time.sleep(1)
         
         debug_shot(driver, "2_filled_form.png")
         
-        # 4. Handle ReCaptcha & Button
-        # Check for ReCaptcha Iframe
-        iframes = driver.find_elements(By.TAG_NAME, "iframe")
-        for frame in iframes:
-            if "recaptcha" in frame.get_attribute("src"):
-                print("⚠️ ReCaptcha Detected. Attempting to scroll it...", flush=True)
-                driver.execute_script("arguments[0].scrollIntoView();", frame)
-                
-        # 5. Click Login
-        print("   -> Searching for Button...", flush=True)
-        btns = driver.find_elements(By.TAG_NAME, "button")
-        login_btn = None
-        for b in btns:
-            if "LOGIN" in b.text.upper() or "SIGN IN" in b.text.upper():
-                login_btn = b
-                break
-                
+        # 4. FIND THE CORRECT BUTTON
+        print("   -> Locating the BIG Yellow Button...", flush=True)
+        
+        # Strategy: Find the button that is physically located AFTER the password box
+        # This prevents clicking the header button by mistake
+        try:
+            login_btn = driver.find_element(By.XPATH, "//input[@type='password']/following::button[contains(., 'LOGIN')]")
+        except:
+            # Fallback: Find the button with type='submit'
+            try:
+                login_btn = driver.find_element(By.XPATH, "//button[@type='submit']")
+            except:
+                login_btn = None
+
         if login_btn:
-            print("   -> Tapping Login Button...", flush=True)
-            # Mobile touch tap
-            touch_click(driver, login_btn)
+            print("   -> Button Found! Force Clicking via JS...", flush=True)
+            
+            # Scroll to it
+            driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", login_btn)
+            time.sleep(1)
+            
+            # FORCE CLICK (JavaScript) - This works even if overlay/chat bubble is blocking it
+            driver.execute_script("arguments[0].click();", login_btn)
         else:
-            print("   -> Button not found, pressing Enter...", flush=True)
+            print("   -> Button NOT found. Using Enter Key fallback...", flush=True)
             pass_box.send_keys(Keys.RETURN)
             
         # 6. Wait for Result
@@ -153,8 +151,16 @@ def perform_login(driver):
         debug_shot(driver, "3_after_click.png")
         
         if "auth" in driver.current_url:
-            send_msg("❌ Still on login page. Check the screenshots!")
-            return False
+            send_msg("❌ Still on login page. Trying One More Click...")
+            # Emergency Retry Click
+            try:
+                login_btn = driver.find_element(By.XPATH, "//button[contains(text(), 'LOGIN')]")
+                driver.execute_script("arguments[0].click();", login_btn)
+                time.sleep(10)
+            except: pass
+            
+            if "auth" in driver.current_url:
+                return False
             
         send_msg("✅ Login Successful!")
         return True
@@ -177,7 +183,7 @@ def monitor_game(driver):
     send_msg("✅ Bot Connected! Watching now...")
     
     start_time = time.time()
-    while time.time() - start_time < 1800:
+    while time.time() - start_time < 1800: # Restart every 30 mins
         time.sleep(5)
             
     return True
