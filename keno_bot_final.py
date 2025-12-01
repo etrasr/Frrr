@@ -17,7 +17,9 @@ ETHIOPIA_TZ = timezone(timedelta(hours=3))
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 CHAT_ID = os.environ.get("CHAT_ID")
 
-SESSION_TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6OTYxMDc3LCJmX25hbWUiOiIrMjUxOTUxNTAyNTAxIiwibF9uYW1lIjoiIiwiZV9tYWlsIjoiIiwiYWN0aXZlIjoxLCJhdmF0YXIiOm51bGwsInVzZXJuYW1lIjoiKzI1MTk1MTUwMjUwMSIsInRpbWV6b25lIjpudWxsLCJiYWxhbmNlIjoiMC4yMiIsInVuaXRzIjoiNS4wMCIsImJpcnRoZGF5IjoiMjAwMC0wOC0wNVQyMTowMDowMC4wMDBaIiwiZ2VuZGVyIjoiTkEiLCJwaG9uZSI6IisyNTE5NTE1MDI1MDEiLCJhZGRyZXNzIjpudWxsLCJjaXR5IjpudWxsLCJjb3VudHJ5IjoiRVRISU9QSUEiLCJjdXJyZW5jeSI6IkVUQiIsImNyZWF0ZWQiOiIyMDIzLTEyLTA1VDE2OjMyOjA1LjAwMFoiLCJraW5kIjoiSU5URVJORVQiLCJiZXR0aW5nX2FsbG93ZWQiOjEsImxvY2FsZSI6ImVuIiwibW9uaXRvcmVkIjowLCJiZXRsaW1pdCI6Ii0xIiwibGl2ZV9kZWxheSI6MCwiZGVsZXRlZCI6MCwiZGVsZXRlZF9hdCI6bnVsbCwidiI6MSwibm90aWZ5X2N0b2tlbiI6ImV5SmhiR2NpT2lKSVV6STFOaUlzSW5SNWNDSTZJa3BYVkNKOS5leUp6ZFdJaU9pSTVOakV3TnpjaUxDSnBZWFFpT2pFM05qUTFPREV4TkRSOS5WNnltb2FzYm1nRUVfTG9qWUcwanRnYXpuOVYtWDlaeVl6ZGZINWFPeUs4IiwiaWF0IjoxNzY0NTgxMTQ0LCJleHAiOjE3NjQ2Njc1NDR9.Jv8YRTa6JqwLocQ-80gtDmkPEbYl72Mb-JTcXjXI43s"
+SESSION_TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6OTYxMDc3LCJmX25hbWUiOiIrMjUxOTUxNTAyNTAxIiwibF9uYW1lIjoiIiwiZV9tYWlsIjoiIiwiYWN0aXZlIjoxLCJhdmF0YXIiOm51bGwsInVzZXJuYW1lIjoiKzI1MTk1MTUwMjUwMSIsInRpbWV6b25lIjpudWxsLCJiYWxhbmNlIjoiMC4yMiIsInVuaXRzIjoiNS4wMCIsImJpcnRoZGF5IjoiMjAwMC0wOC0wNVQyMTowMDowMC4wMDBaIiwiZ2VuZGVyIjoiTkEiLCJwaG9uZSI6IisyNTE5NTE1MDI1MDEiLCJhZGRyZXNzIjpudWxsLCJjaXR5IjpudWxsLCJjb3VudHJ5IjoiRVRISU9QSUEiLCJjdXJyZW5jeSI6IkVUQiIsImNyZWF0ZWQiOiIyMDIzLTEyLTA1VDE2OjMyOjA1LjAwMFoiLCJraW5kIjoiSU5URVJORVQiLCJiZXR0aW5nX2FsbG93ZWQiOjEsImxvY2FsZSI6ImVuIiwibW9uaXRvcmVkIjowLCJiZXRsaW1pdCI6Ii0xIiwibGl2ZV9kZWxheSI6MCwiZGVsZXRlZCI6MCwiZGVsZXRlZF9hdCI6bnVsbCwidiI6MSwibm90aWZ5X2N0b2tlbiI6ImV5SmhiR2NpT2lKSVV6STFOaUlzSW5SNWNDSTZJa3BYVkNKOS5leUp6ZFdJaU9pSTVOakV3TnpjaUxDSnBZWFFpT2pFM05qUTFOemt5T0RSOS5UZlJyT2lsN0Fscm1aSXZZcUFpblhSX3RfQmNQbmVJZkJkN2RnQWFwQ2hjIiwiaWF0IjoxNzY0NTc5Mjg0LCJleHAiOjE3NjQ2NjU2ODR9.nwlc0-7RbhPbhAT0Ow7MVrC0lZo6w6Cjzh-rr54ThJI"
+"
+
 GAME_URL = "https://flashsport.bet/en/casino?game=%2Fkeno1675&returnUrl=casino"
 BASE_URL = "https://flashsport.bet"
 
@@ -29,7 +31,8 @@ bot_state = {
     "daily_flashes": 0,
     "last_daily_report": time.time(),
     "web_server_healthy": False,
-    "session_expired_alert_sent": False
+    "session_expired_alert_sent": False,
+    "failed_load_count": 0
 }
 
 def eth_time():
@@ -254,12 +257,12 @@ def start_web_server():
 
 def monitor_game():
     log_msg("=" * 70)
-    log_msg("🟢 KENO BOT v7 - WITH SESSION EXPIRY ALERTS + 24/7 LOGGING")
+    log_msg("🟢 KENO BOT v7 - GREEN FLASH DETECTION + DAILY REPORT")
     log_msg("=" * 70)
     log_msg("🔴 Commands: /screenshot, /status, /help")
     log_msg("📋 SESSION TOKEN: Edit the SESSION_TOKEN variable in code if expired")
-    log_msg("🔴 Session expiry alerts enabled to Telegram")
     log_msg("❤️  24/7 heartbeat logging every 10 seconds")
+    log_msg("📊 24-hour daily reports to Telegram")
     
     session_retry = 0
     
@@ -271,6 +274,7 @@ def monitor_game():
             
             driver = setup_chrome()
             bot_state["driver"] = driver
+            bot_state["failed_load_count"] = 0
             
             log_msg("🔐 Logging in...")
             driver.get(BASE_URL)
@@ -287,23 +291,12 @@ def monitor_game():
             driver.get(GAME_URL)
             time.sleep(5)
             
-            # Check if page loaded correctly
-            page_source = driver.page_source.lower()
-            if "keno" not in page_source or "error" in page_source or "login" in page_source:
-                error_msg = "⚠️ SESSION EXPIRED - Cannot load game page! Update SESSION_TOKEN in code!"
-                log_msg(error_msg)
-                if not bot_state["session_expired_alert_sent"]:
-                    send_telegram_message(f"🔴 ALERT\n{error_msg}\nTime: {eth_time()}")
-                    bot_state["session_expired_alert_sent"] = True
-                time.sleep(5)
-                continue
-            
-            bot_state["session_expired_alert_sent"] = False
             log_msg("⏱️  COUNTDOWN PHASE - Monitoring for green flashes")
             
             bot_state["session_start"] = time.time()
             bot_state["flashes_detected"] = 0
             bot_state["daily_flashes"] = 0
+            bot_state["session_expired_alert_sent"] = False
             in_results_phase = False
             last_status_log = time.time()
             last_daily_report = time.time()
@@ -316,8 +309,19 @@ def monitor_game():
                     
                     try:
                         driver.save_screenshot(img_path)
+                        bot_state["failed_load_count"] = 0
                     except Exception as e:
+                        bot_state["failed_load_count"] += 1
                         log_msg(f"⚠️  Screenshot timeout: {str(e)[:30]}")
+                        
+                        if bot_state["failed_load_count"] > 5:
+                            if not bot_state["session_expired_alert_sent"]:
+                                error_msg = "🔴 SESSION EXPIRED - Cannot load game! Update SESSION_TOKEN in code!"
+                                log_msg(error_msg)
+                                send_telegram_message(f"{error_msg}\n⏱️ Time: {eth_time()}")
+                                bot_state["session_expired_alert_sent"] = True
+                            break
+                        
                         time.sleep(1)
                         continue
                     
@@ -356,7 +360,7 @@ def monitor_game():
                     if time.time() - last_daily_report > 86400:
                         report_msg = f"📊 24-HOUR REPORT\n📅 Date: {eth_date()}\n🟢 Flashes: {bot_state['daily_flashes']}\n⏱️ Time: {eth_time()}"
                         if send_telegram_message(report_msg):
-                            log_msg(f"📸 24-hour report sent: {bot_state['daily_flashes']} flashes")
+                            log_msg(f"📊 24-hour report sent: {bot_state['daily_flashes']} flashes")
                         bot_state["daily_flashes"] = 0
                         last_daily_report = time.time()
                     
