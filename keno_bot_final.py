@@ -17,8 +17,7 @@ ETHIOPIA_TZ = timezone(timedelta(hours=3))
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 CHAT_ID = os.environ.get("CHAT_ID")
 
-SESSION_TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6OTYxMDc3LCJmX25hbWUiOiIrMjUxOTUxNTAyNTAxIiwibF9uYW1lIjoiIiwiZV9tYWlsIjoiIiwiYWN0aXZlIjoxLCJhdmF0YXIiOm51bGwsInVzZXJuYW1lIjoiKzI1MTk1MTUwMjUwMSIsInRpbWV6b25lIjpudWxsLCJiYWxhbmNlIjoiMC4yMiIsInVuaXRzIjoiNS4wMCIsImJpcnRoZGF5IjoiMjAwMC0wOC0wNVQyMTowMDowMC4wMDBaIiwiZ2VuZGVyIjoiTkEiLCJwaG9uZSI6IisyNTE5NTE1MDI1MDEiLCJhZGRyZXNzIjpudWxsLCJjaXR5IjpudWxsLCJjb3VudHJ5IjoiRVRISU9QSUEiLCJjdXJyZW5jeSI6IkVUQiIsImNyZWF0ZWQiOiIyMDIzLTEyLTA1VDE2OjMyOjA1LjAwMFoiLCJraW5kIjoiSU5URVJORVQiLCJiZXR0aW5nX2FsbG93ZWQiOjEsImxvY2FsZSI6ImVuIiwibW9uaXRvcmVkIjowLCJiZXRsaW1pdCI6Ii0xIiwibGl2ZV9kZWxheSI6MCwiZGVsZXRlZCI6MCwiZGVsZXRlZF9hdCI6bnVsbCwidiI6MSwibm90aWZ5X2N0b2tlbiI6ImV5SmhiR2NpT2lKSVV6STFOaUlzSW5SNWNDSTZJa3BYVkNKOS5leUp6ZFdJaU9pSTVOakV3TnpjaUxDSnBZWFFpT2pFM05qUTFOemt5T0RSOS5UZlJyT2lsN0Fscm1aSXZZcUFpblhSX3RfQmNQbmVJZkJkN2RnQWFwQ2hjIiwiaWF0IjoxNzY0NTc5Mjg0LCJleHAiOjE3NjQ2NjU2ODR9.nwlc0-7RbhPbhAT0Ow7MVrC0lZo6w6Cjzh-rr54ThJI"
-
+SESSION_TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6OTYxMDc3LCJmX25hbWUiOiIrMjUxOTUxNTAyNTAxIiwibF9uYW1lIjoiIiwiZV9tYWlsIjoiIiwiYWN0aXZlIjoxLCJhdmF0YXIiOm51bGwsInVzZXJuYW1lIjoiKzI1MTk1MTUwMjUwMSIsInRpbWV6b25lIjpudWxsLCJiYWxhbmNlIjoiMC4yMiIsInVuaXRzIjoiNS4wMCIsImJpcnRoZGF5IjoiMjAwMC0wOC0wNVQyMTowMDowMC4wMDBaIiwiZ2VuZGVyIjoiTkEiLCJwaG9uZSI6IisyNTE5NTE1MDI1MDEiLCJhZGRyZXNzIjpudWxsLCJjaXR5IjpudWxsLCJjb3VudHJ5IjoiRVRISU9QSUEiLCJjdXJyZW5jeSI6IkVUQiIsImNyZWF0ZWQiOiIyMDIzLTEyLTA1VDE2OjMyOjA1LjAwMFoiLCJraW5kIjoiSU5URVJORVQiLCJiZXR0aW5nX2FsbG93ZWQiOjEsImxvY2FsZSI6ImVuIiwibW9uaXRvcmVkIjowLCJiZXRsaW1pdCI6Ii0xIiwibGl2ZV9kZWxheSI6MCwiZGVsZXRlZCI6MCwiZGVsZXRlZF9hdCI6bnVsbCwiviI6MSwibm90aWZ5X2N0b2tlbiI6ImV5SmhiR2NpT2lKSVV6STFOaUlzSW5SNWNDSTZJa3BYVkNKOS5leUp6ZFdJaU9pSTVOakV3TnpjaUxDSnBZWFFpT2pFM05qUTFOemt5T0RTOS5UZlJyT2lsN0Fscm1aSXZZcUFpblhSX3RfQmNQbmVJZkJkN2RnQWFwQ2hjIiwiaWF0IjoxNzY0NTc5Mjg0LCJleHAiOjE3NjQ2NjU2ODR9.nwlc0-7RbhPbhAT0Ow7MVrC0lZo6w6Cjzh-rr54ThJI"
 
 GAME_URL = "https://flashsport.bet/en/casino?game=%2Fkeno1675&returnUrl=casino"
 BASE_URL = "https://flashsport.bet"
@@ -257,12 +256,11 @@ def start_web_server():
 
 def monitor_game():
     log_msg("=" * 70)
-    log_msg("🟢 KENO BOT v7 - GREEN FLASH DETECTION + DAILY REPORT")
+    log_msg("🟢 KENO BOT v7 - GREEN FLASH DETECTION + AUTO-RELOAD")
     log_msg("=" * 70)
     log_msg("🔴 Commands: /screenshot, /status, /help")
-    log_msg("📋 SESSION TOKEN: Edit the SESSION_TOKEN variable in code if expired")
     log_msg("❤️  24/7 heartbeat logging every 10 seconds")
-    log_msg("📊 24-hour daily reports to Telegram")
+    log_msg("📊 Auto-reloads game when session expires")
     
     session_retry = 0
     
@@ -310,13 +308,22 @@ def monitor_game():
                     try:
                         driver.save_screenshot(img_path)
                         bot_state["failed_load_count"] = 0
+                        
+                        # Check if game session expired (not token, just game session)
+                        page_source = driver.page_source
+                        if "YOUR GAME SESSION EXPIRED" in page_source or "RELOAD THE GAME" in page_source:
+                            log_msg("⚠️  Game session expired - Auto-reloading game...")
+                            driver.get(GAME_URL)
+                            time.sleep(5)
+                            continue
+                            
                     except Exception as e:
                         bot_state["failed_load_count"] += 1
                         log_msg(f"⚠️  Screenshot timeout: {str(e)[:30]}")
                         
                         if bot_state["failed_load_count"] > 5:
                             if not bot_state["session_expired_alert_sent"]:
-                                error_msg = "🔴 SESSION EXPIRED - Cannot load game! Update SESSION_TOKEN in code!"
+                                error_msg = "🔴 TOKEN EXPIRED - Restarting bot session..."
                                 log_msg(error_msg)
                                 send_telegram_message(f"{error_msg}\n⏱️ Time: {eth_time()}")
                                 bot_state["session_expired_alert_sent"] = True
