@@ -213,10 +213,14 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
             self.end_headers()
     def log_message(self, format, *args): pass
 
+# --- MODIFIED: Uses Render's PORT variable ---
 def start_web_server():
-    log_msg("🌐 Starting web server on port 10000...")
+    # Render assigns a port via the PORT environment variable.
+    # We must use that, otherwise the web service won't be accessible.
+    port = int(os.environ.get("PORT", 10000))
+    log_msg(f"🌐 Starting web server on port {port}...")
     try:
-        server = HTTPServer(('0.0.0.0', 10000), HealthCheckHandler)
+        server = HTTPServer(('0.0.0.0', port), HealthCheckHandler)
         threading.Thread(target=server.serve_forever, daemon=True).start()
     except Exception as e:
         log_msg(f"⚠️ Web server error: {e}")
