@@ -16,7 +16,9 @@ ETHIOPIA_TZ = timezone(timedelta(hours=3))
 
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 CHAT_ID = os.environ.get("CHAT_ID")
-SESSION_TOKEN = os.environ.get("SESSION_TOKEN")
+
+SESSION_TOKEN = "YOUR_SESSION_TOKEN_HERE"
+
 GAME_URL = "https://flashsport.bet/en/casino?game=%2Fkeno1675&returnUrl=casino"
 BASE_URL = "https://flashsport.bet"
 
@@ -24,11 +26,17 @@ bot_state = {
     "driver": None,
     "flashes_detected": 0,
     "session_start": None,
-    "in_results_phase": False
+    "in_results_phase": False,
+    "daily_flashes": 0,
+    "last_daily_report": time.time(),
+    "web_server_healthy": False
 }
 
 def eth_time():
     return datetime.now(ETHIOPIA_TZ).strftime("%H:%M:%S")
+
+def eth_date():
+    return datetime.now(ETHIOPIA_TZ).strftime("%Y-%m-%d")
 
 def log_msg(msg):
     ts = eth_time()
@@ -188,7 +196,7 @@ def handle_telegram_commands():
                         
                         if bot_state["session_start"]:
                             elapsed = (time.time() - bot_state["session_start"]) / 60
-                            status_text = f"✅ BOT STATUS\n📍 Running: {int(elapsed)}min\n🟢 Green flashes: {bot_state['flashes_detected']}\n⏱️ Time: {eth_time()}"
+                            status_text = f"✅ BOT STATUS\n📍 Running: {int(elapsed)}min\n🟢 Today flashes: {bot_state['daily_flashes']}\n⏱️ Time: {eth_time()}"
                         else:
                             status_text = "⚠️ Bot starting..."
                         
@@ -198,7 +206,7 @@ def handle_telegram_commands():
                         log_msg("ℹ️ /help command received")
                         help_text = """🎯 KENO BOT COMMANDS:
 /screenshot - Get current game screenshot
-/status - Show bot status & flashes count
+/status - Show bot status & today flashes
 /help - Show this message"""
                         send_telegram_message(help_text)
             
@@ -209,41 +217,47 @@ def handle_telegram_commands():
             time.sleep(5)
 
 class HealthCheckHandler(BaseHTTPRequestHandler):
-    """Simple HTTP handler for health checks"""
     
     def do_GET(self):
+        bot_state["web_server_healthy"] = True
+        
         if self.path == '/' or self.path == '/health':
             self.send_response(200)
-            self.send_header('Content-type', 'text/plain')
+            self.send_header('Content-type', 'application/json')
+            self.send_header('Connection', 'close')
             self.end_headers()
-            elapsed_time = (time.time() - bot_state["session_start"]) / 60 if bot_state["session_start"] else 0
-            health_msg = f'KENO BOT v5 RUNNING - Status: Active | Flashes: {bot_state["flashes_detected"]} | Uptime: {int(elapsed_time)}min\n'
-            self.wfile.write(health_msg.encode())
+            
+            try:
+                elapsed_time = (time.time() - bot_state["session_start"]) / 60 if bot_state["session_start"] else 0
+                health_data = f'{{"status": "ok", "flashes": {bot_state["daily_flashes"]}, "uptime_min": {int(elapsed_time)}}}'
+                self.wfile.write(health_data.encode())
+            except:
+                self.wfile.write(b'{"status":"ok"}')
         else:
             self.send_response(404)
             self.end_headers()
     
-    def log_message(self, format, *args):
+    def log_message(self, format_string, *args):
         pass
 
 def start_web_server():
-    """Start simple web server on port 10000 for Render health checks"""
     log_msg("🌐 Starting web server on port 10000...")
     try:
         server = HTTPServer(('0.0.0.0', 10000), HealthCheckHandler)
+        server.timeout = 30
         server_thread = threading.Thread(target=server.serve_forever, daemon=True)
         server_thread.daemon = True
         server_thread.start()
-        log_msg("✅ Web server running on port 10000 - Uptime Robot check /health")
+        log_msg("✅ Web server running - Uptime Robot can check /health")
     except Exception as e:
         log_msg(f"⚠️ Web server error: {str(e)[:50]}")
 
 def monitor_game():
-    """Main game monitoring loop"""
     log_msg("=" * 70)
-    log_msg("🟢 KENO BOT v5 - GREEN FLASH DETECTION + TELEGRAM COMMANDS")
+    log_msg("🟢 KENO BOT v6 - GREEN FLASH DETECTION + DAILY REPORT")
     log_msg("=" * 70)
     log_msg("🔴 Commands: /screenshot, /status, /help")
+    log_msg("📋 SESSION TOKEN: Edit the SESSION_TOKEN variable in code if expired")
     
     session_retry = 0
     
@@ -275,9 +289,10 @@ def monitor_game():
             
             bot_state["session_start"] = time.time()
             bot_state["flashes_detected"] = 0
-            status_sent = False
+            bot_state["daily_flashes"] = 0
             in_results_phase = False
             last_status_log = time.time()
+            last_daily_report = time.time()
             scan_count = 0
             
             while (time.time() - bot_state["session_start"]) < 10800:
@@ -305,29 +320,26 @@ def monitor_game():
                         
                         if detect_green_flash(img_path):
                             bot_state["flashes_detected"] += 1
+                            bot_state["daily_flashes"] += 1
                             
-                            alert_caption = f"🟢 GREEN FLASH #{bot_state['flashes_detected']} | Time: {eth_time()}"
+                            alert_caption = f"🟢 GREEN FLASH #{bot_state['daily_flashes']} | Time: {eth_time()}"
                             if send_to_telegram(img_path, alert_caption):
-                                log_msg(f"🚨 GREEN FLASH #{bot_state['flashes_detected']} DETECTED & SENT!")
+                                log_msg(f"🚨 GREEN FLASH #{bot_state['daily_flashes']} DETECTED & SENT!")
                             
                             time.sleep(0.5)
                     
                     elapsed = time.time() - bot_state["session_start"]
                     
                     if time.time() - last_status_log > 30:
-                        log_msg(f"✅ MONITORING ACTIVE | Scans: {scan_count} | Flashes: {bot_state['flashes_detected']} | Time: {eth_time()}")
+                        log_msg(f"✅ ACTIVE | Scans: {scan_count} | Today: {bot_state['daily_flashes']} flashes | Time: {eth_time()}")
                         last_status_log = time.time()
                     
-                    if elapsed > 7200 and not status_sent:
-                        try:
-                            status_img = f"/tmp/keno_status_{int(time.time())}.png"
-                            driver.save_screenshot(status_img)
-                            caption = f"✅ BOT ALIVE | Flashes: {bot_state['flashes_detected']} | Time: {eth_time()}"
-                            if send_to_telegram(status_img, caption):
-                                log_msg(f"📸 Status sent: {bot_state['flashes_detected']} flashes in 2 hours")
-                            status_sent = True
-                        except Exception as e:
-                            log_msg(f"❌ Status error: {str(e)[:50]}")
+                    if time.time() - last_daily_report > 86400:
+                        report_msg = f"📊 24-HOUR REPORT\n📅 Date: {eth_date()}\n🟢 Flashes: {bot_state['daily_flashes']}\n⏱️ Time: {eth_time()}"
+                        if send_telegram_message(report_msg):
+                            log_msg(f"📸 24-hour report sent: {bot_state['daily_flashes']} flashes")
+                        bot_state["daily_flashes"] = 0
+                        last_daily_report = time.time()
                     
                     time.sleep(1)
                     
@@ -335,7 +347,7 @@ def monitor_game():
                     log_msg(f"⚠️  Scan error: {str(e)[:50]}")
                     time.sleep(1)
             
-            log_msg(f"✅ Session #{session_retry} complete - {bot_state['flashes_detected']} flashes")
+            log_msg(f"✅ Session #{session_retry} complete - {bot_state['flashes_detected']} total flashes")
             
         except Exception as e:
             log_msg(f"❌ Session error: {str(e)[:50]}")
