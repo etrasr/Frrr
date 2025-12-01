@@ -256,11 +256,12 @@ def start_web_server():
 
 def monitor_game():
     log_msg("=" * 70)
-    log_msg("🟢 KENO BOT v7 - GREEN FLASH DETECTION + AUTO-RELOAD")
+    log_msg("🟢 KENO BOT v7 - GREEN FLASH DETECTION + DAILY REPORT")
     log_msg("=" * 70)
     log_msg("🔴 Commands: /screenshot, /status, /help")
+    log_msg("📋 SESSION TOKEN: Edit the SESSION_TOKEN variable in code if expired")
     log_msg("❤️  24/7 heartbeat logging every 10 seconds")
-    log_msg("📊 Auto-reloads game when session expires")
+    log_msg("📊 24-hour daily reports to Telegram")
     
     session_retry = 0
     
@@ -276,18 +277,25 @@ def monitor_game():
             
             log_msg("🔐 Logging in...")
             driver.get(BASE_URL)
-            time.sleep(1)
+            time.sleep(2)
+            
+            # Set cookie and reload
             driver.add_cookie({
                 "name": "token",
                 "value": SESSION_TOKEN,
-                "domain": "flashsport.bet",
-                "path": "/"
+                "domain": ".flashsport.bet",
+                "path": "/",
+                "secure": True,
+                "httpOnly": False,
+                "sameSite": "Lax"
             })
-            log_msg("✅ Session ready")
+            log_msg("✅ Token set - Loading...")
+            driver.refresh()
+            time.sleep(3)
             
             log_msg("🎮 Loading game...")
             driver.get(GAME_URL)
-            time.sleep(5)
+            time.sleep(7)
             
             log_msg("⏱️  COUNTDOWN PHASE - Monitoring for green flashes")
             
