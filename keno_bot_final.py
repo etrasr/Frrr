@@ -29,7 +29,8 @@ bot_state = {
     "in_results_phase": False,
     "daily_flashes": 0,
     "last_daily_report": time.time(),
-    "web_server_healthy": False
+    "web_server_healthy": False,
+    "session_expired_alert_sent": False
 }
 
 def eth_time():
@@ -254,10 +255,12 @@ def start_web_server():
 
 def monitor_game():
     log_msg("=" * 70)
-    log_msg("🟢 KENO BOT v6 - GREEN FLASH DETECTION + DAILY REPORT")
+    log_msg("🟢 KENO BOT v7 - WITH SESSION EXPIRY ALERTS + 24/7 LOGGING")
     log_msg("=" * 70)
     log_msg("🔴 Commands: /screenshot, /status, /help")
     log_msg("📋 SESSION TOKEN: Edit the SESSION_TOKEN variable in code if expired")
+    log_msg("🔴 Session expiry alerts enabled to Telegram")
+    log_msg("❤️  24/7 heartbeat logging every 10 seconds")
     
     session_retry = 0
     
@@ -285,6 +288,18 @@ def monitor_game():
             driver.get(GAME_URL)
             time.sleep(5)
             
+            # Check if page loaded correctly
+            page_source = driver.page_source.lower()
+            if "keno" not in page_source or "error" in page_source or "login" in page_source:
+                error_msg = "⚠️ SESSION EXPIRED - Cannot load game page! Update SESSION_TOKEN in code!"
+                log_msg(error_msg)
+                if not bot_state["session_expired_alert_sent"]:
+                    send_telegram_message(f"🔴 ALERT\n{error_msg}\nTime: {eth_time()}")
+                    bot_state["session_expired_alert_sent"] = True
+                time.sleep(5)
+                continue
+            
+            bot_state["session_expired_alert_sent"] = False
             log_msg("⏱️  COUNTDOWN PHASE - Monitoring for green flashes")
             
             bot_state["session_start"] = time.time()
@@ -293,6 +308,7 @@ def monitor_game():
             in_results_phase = False
             last_status_log = time.time()
             last_daily_report = time.time()
+            last_heartbeat_log = time.time()
             scan_count = 0
             
             while (time.time() - bot_state["session_start"]) < 10800:
@@ -333,6 +349,10 @@ def monitor_game():
                     if time.time() - last_status_log > 30:
                         log_msg(f"✅ ACTIVE | Scans: {scan_count} | Today: {bot_state['daily_flashes']} flashes | Time: {eth_time()}")
                         last_status_log = time.time()
+                    
+                    if time.time() - last_heartbeat_log > 10:
+                        log_msg(f"❤️  HEARTBEAT | Bot running 24/7 | {eth_time()}")
+                        last_heartbeat_log = time.time()
                     
                     if time.time() - last_daily_report > 86400:
                         report_msg = f"📊 24-HOUR REPORT\n📅 Date: {eth_date()}\n🟢 Flashes: {bot_state['daily_flashes']}\n⏱️ Time: {eth_time()}"
