@@ -252,7 +252,7 @@ def monitor_game():
     log_msg("🟢 KENO BOT v6 - GREEN FLASH + AUTO-RELOAD + DAILY REPORTS")
     log_msg("=" * 70)
     log_msg("🔴 Commands: /screenshot, /status, /help")
-    log_msg("📋 SESSION_TOKEN: Hardcoded in code (line 20)")
+    log_msg("📋 SESSION_TOKEN: Hardcoded (line 20)")
     log_msg("❤️  24/7 heartbeat logging every 10 seconds")
     log_msg("📊 24-hour daily flash reports to Telegram")
     
