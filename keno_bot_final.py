@@ -17,7 +17,8 @@ ETHIOPIA_TZ = timezone(timedelta(hours=3))
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 CHAT_ID = os.environ.get("CHAT_ID")
 
-SESSION_TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6OTYxMDc3LCJmX25hbWUiOiIrMjUxOTUxNTAyNTAxIiwibF9uYW1lIjoiIiwiZV9tYWlsIjoiIiwiYWN0aXZlIjoxLCJhdmF0YXIiOm51bGwsInVzZXJuYW1lIjoiKzI1MTk1MTUwMjUwMSIsInRpbWV6b25lIjpudWxsLCJiYWxhbmNlIjoiMC4yMiIsInVuaXRzIjoiNS4wMCIsImJpcnRoZGF5IjoiMjAwMC0wOC0wNVQyMTowMDowMC4wMDBaIiwiZ2VuZGVyIjoiTkEiLCJwaG9uZSI6IisyNTE5NTE1MDI1MDEiLCJhZGRyZXNzIjpudWxsLCJjaXR5IjpudWxsLCJjb3VudHJ5IjoiRVRISU9QSUEiLCJjdXJyZW5jeSI6IkVUQiIsImNyZWF0ZWQiOiIyMDIzLTEyLTA1VDE2OjMyOjA1LjAwMFoiLCJraW5kIjoiSU5URVJORVQiLCJiZXR0aW5nX2FsbG93ZWQiOjEsImxvY2FsZSI6ImVuIiwibW9uaXRvcmVkIjowLCJiZXRsaW1pdCI6Ii0xIiwibGl2ZV9kZWxheSI6MCwiZGVsZXRlZCI6MCwiZGVsZXRlZF9hdCI6bnVsbCwiviI6MSwibm90aWZ5X2N0b2tlbiI6ImV5SmhiR2NpT2lKSVV6STFOaUlzSW5SNWNDSTZJa3BYVkNKOS5leUp6ZFdJaU9pSTVOakV3TnpjaUxDSnBZWFFpT2pFM05qUTFOemt5T0RTOS5UZlJyT2lsN0Fscm1aSXZZcUFpblhSX3RfQmNQbmVJZkJkN2RnQWFwQ2hjIiwiaWF0IjoxNzY0NTc5Mjg0LCJleHAiOjE3NjQ2NjU2ODR9.nwlc0-7RbhPbhAT0Ow7MVrC0lZo6w6Cjzh-rr54ThJI"
+# ✅ HARDCODED SESSION TOKEN
+SESSION_TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6OTYxMDc3LCJmX25hbWUiOiIrMjUxOTUxNTAyNTAxIiwibF9uYW1lIjoiIiwiZV9tYWlsIjoiIiwiYWN0aXZlIjoxLCJhdmF0YXIiOm51bGwsInVzZXJuYW1lIjoiKzI1MTk1MTUwMjUwMSIsInRpbWV6b25lIjpudWxsLCJiYWxhbmNlIjoiMC4yMiIsInVuaXRzIjoiNS4wMCIsImJpcnRoZGF5IjoiMjAwMC0wOC0wNVQyMTowMDowMC4wMDBaIiwiZ2VuZGVyIjoiTkEiLCJwaG9uZSI6IisyNTE5NTE1MDI1MDEiLCJhZGRyZXNzIjpudWxsLCJjaXR5IjpudWxsLCJjb3VudHJ5IjoiRVRISU9QSUEiLCJjdXJyZW5jeSI6IkVUQiIsImNyZWF0ZWQiOiIyMDIzLTEyLTA1VDE2OjMyOjA1LjAwMFoiLCJraW5kIjoiSU5URVJORVQiLCJiZXR0aW5nX2FsbG93ZWQiOjEsImxvY2FsZSI6ImVuIiwibW9uaXRvcmVkIjowLCJiZXRsaW1pdCI6Ii0xIiwibGl2ZV9kZWxheSI6MCwiZGVsZXRlZCI6MCwiZGVsZXRlZF9hdCI6bnVsbCwiviI6MSwibm90aWZ5X2N0b2tlbiI6ImV5SmhiR2NpT2lKSVV6STFOaUlzSW5SNWNDSTZJa3BYVkNKOS5leUp6ZFdJaU9pSTVOakV3TnpjaUxDSnBZWFFpT2pFM05qUTFOekt5T0RTOS5UZlJyT2lsN0Fscm1aSXZZcUFpblhSX3RfQmNQbmVJZkJkN2RnQWFwQ2hjIiwiaWF0IjoxNzY0NTc5Mjg0LCJleHAiOjE3NjQ2NjU2ODR9.nwlc0-7RbhPbhAT0Ow7MVrC0lZo6w6Cjzh-rr54ThJI"
 
 GAME_URL = "https://flashsport.bet/en/casino?game=%2Fkeno1675&returnUrl=casino"
 BASE_URL = "https://flashsport.bet"
@@ -28,10 +29,7 @@ bot_state = {
     "session_start": None,
     "in_results_phase": False,
     "daily_flashes": 0,
-    "last_daily_report": time.time(),
-    "web_server_healthy": False,
-    "session_expired_alert_sent": False,
-    "failed_load_count": 0
+    "last_daily_report": time.time()
 }
 
 def eth_time():
@@ -219,49 +217,44 @@ def handle_telegram_commands():
             time.sleep(5)
 
 class HealthCheckHandler(BaseHTTPRequestHandler):
+    """Simple HTTP handler for health checks"""
     
     def do_GET(self):
-        bot_state["web_server_healthy"] = True
-        
         if self.path == '/' or self.path == '/health':
             self.send_response(200)
-            self.send_header('Content-type', 'application/json')
-            self.send_header('Connection', 'close')
+            self.send_header('Content-type', 'text/plain')
             self.end_headers()
-            
-            try:
-                elapsed_time = (time.time() - bot_state["session_start"]) / 60 if bot_state["session_start"] else 0
-                health_data = f'{{"status": "ok", "flashes": {bot_state["daily_flashes"]}, "uptime_min": {int(elapsed_time)}}}'
-                self.wfile.write(health_data.encode())
-            except:
-                self.wfile.write(b'{"status":"ok"}')
+            elapsed_time = (time.time() - bot_state["session_start"]) / 60 if bot_state["session_start"] else 0
+            health_msg = f'KENO BOT v6 RUNNING - Status: Active | Flashes: {bot_state["daily_flashes"]} | Uptime: {int(elapsed_time)}min\n'
+            self.wfile.write(health_msg.encode())
         else:
             self.send_response(404)
             self.end_headers()
     
-    def log_message(self, format_string, *args):
+    def log_message(self, format, *args):
         pass
 
 def start_web_server():
+    """Start simple web server on port 10000 for Render health checks"""
     log_msg("🌐 Starting web server on port 10000...")
     try:
         server = HTTPServer(('0.0.0.0', 10000), HealthCheckHandler)
-        server.timeout = 30
         server_thread = threading.Thread(target=server.serve_forever, daemon=True)
         server_thread.daemon = True
         server_thread.start()
-        log_msg("✅ Web server running - Uptime Robot can check /health")
+        log_msg("✅ Web server running on port 10000 - Uptime Robot check /health")
     except Exception as e:
         log_msg(f"⚠️ Web server error: {str(e)[:50]}")
 
 def monitor_game():
+    """Main game monitoring loop"""
     log_msg("=" * 70)
-    log_msg("🟢 KENO BOT v7 - GREEN FLASH DETECTION + DAILY REPORT")
+    log_msg("🟢 KENO BOT v6 - GREEN FLASH + AUTO-RELOAD + DAILY REPORTS")
     log_msg("=" * 70)
     log_msg("🔴 Commands: /screenshot, /status, /help")
-    log_msg("📋 SESSION TOKEN: Edit the SESSION_TOKEN variable in code if expired")
+    log_msg("📋 SESSION_TOKEN: Hardcoded in code (line 20)")
     log_msg("❤️  24/7 heartbeat logging every 10 seconds")
-    log_msg("📊 24-hour daily reports to Telegram")
+    log_msg("📊 24-hour daily flash reports to Telegram")
     
     session_retry = 0
     
@@ -273,40 +266,32 @@ def monitor_game():
             
             driver = setup_chrome()
             bot_state["driver"] = driver
-            bot_state["failed_load_count"] = 0
             
             log_msg("🔐 Logging in...")
             driver.get(BASE_URL)
-            time.sleep(2)
-            
-            # Set cookie and reload
+            time.sleep(1)
             driver.add_cookie({
                 "name": "token",
                 "value": SESSION_TOKEN,
-                "domain": ".flashsport.bet",
-                "path": "/",
-                "secure": True,
-                "httpOnly": False,
-                "sameSite": "Lax"
+                "domain": "flashsport.bet",
+                "path": "/"
             })
-            log_msg("✅ Token set - Loading...")
-            driver.refresh()
-            time.sleep(3)
+            log_msg("✅ Session ready")
             
             log_msg("🎮 Loading game...")
             driver.get(GAME_URL)
-            time.sleep(7)
+            time.sleep(5)
             
             log_msg("⏱️  COUNTDOWN PHASE - Monitoring for green flashes")
             
             bot_state["session_start"] = time.time()
             bot_state["flashes_detected"] = 0
             bot_state["daily_flashes"] = 0
-            bot_state["session_expired_alert_sent"] = False
+            status_sent = False
             in_results_phase = False
             last_status_log = time.time()
-            last_daily_report = time.time()
             last_heartbeat_log = time.time()
+            last_daily_report = time.time()
             scan_count = 0
             
             while (time.time() - bot_state["session_start"]) < 10800:
@@ -315,9 +300,8 @@ def monitor_game():
                     
                     try:
                         driver.save_screenshot(img_path)
-                        bot_state["failed_load_count"] = 0
                         
-                        # Check if game session expired (not token, just game session)
+                        # ✅ AUTO-RELOAD WHEN GAME SESSION EXPIRES
                         page_source = driver.page_source
                         if "YOUR GAME SESSION EXPIRED" in page_source or "RELOAD THE GAME" in page_source:
                             log_msg("⚠️  Game session expired - Auto-reloading game...")
@@ -326,17 +310,7 @@ def monitor_game():
                             continue
                             
                     except Exception as e:
-                        bot_state["failed_load_count"] += 1
                         log_msg(f"⚠️  Screenshot timeout: {str(e)[:30]}")
-                        
-                        if bot_state["failed_load_count"] > 5:
-                            if not bot_state["session_expired_alert_sent"]:
-                                error_msg = "🔴 TOKEN EXPIRED - Restarting bot session..."
-                                log_msg(error_msg)
-                                send_telegram_message(f"{error_msg}\n⏱️ Time: {eth_time()}")
-                                bot_state["session_expired_alert_sent"] = True
-                            break
-                        
                         time.sleep(1)
                         continue
                     
@@ -364,16 +338,19 @@ def monitor_game():
                     
                     elapsed = time.time() - bot_state["session_start"]
                     
-                    if time.time() - last_status_log > 30:
-                        log_msg(f"✅ ACTIVE | Scans: {scan_count} | Today: {bot_state['daily_flashes']} flashes | Time: {eth_time()}")
-                        last_status_log = time.time()
-                    
+                    # ✅ 24/7 HEARTBEAT LOGGING EVERY 10 SECONDS
                     if time.time() - last_heartbeat_log > 10:
                         log_msg(f"❤️  HEARTBEAT | Bot running 24/7 | {eth_time()}")
                         last_heartbeat_log = time.time()
                     
+                    # Status log every 30 seconds
+                    if time.time() - last_status_log > 30:
+                        log_msg(f"✅ MONITORING ACTIVE | Scans: {scan_count} | Today: {bot_state['daily_flashes']} flashes | Time: {eth_time()}")
+                        last_status_log = time.time()
+                    
+                    # ✅ DAILY FLASH REPORT EVERY 24 HOURS
                     if time.time() - last_daily_report > 86400:
-                        report_msg = f"📊 24-HOUR REPORT\n📅 Date: {eth_date()}\n🟢 Flashes: {bot_state['daily_flashes']}\n⏱️ Time: {eth_time()}"
+                        report_msg = f"📊 24-HOUR FLASH REPORT\n📅 Date: {eth_date()}\n🟢 Total Flashes: {bot_state['daily_flashes']}\n⏱️ Time: {eth_time()}"
                         if send_telegram_message(report_msg):
                             log_msg(f"📊 24-hour report sent: {bot_state['daily_flashes']} flashes")
                         bot_state["daily_flashes"] = 0
