@@ -12,37 +12,40 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
 from selenium_stealth import stealth
 
+# --- CONFIGURATION ---
 ETHIOPIA_TZ = timezone(timedelta(hours=3))
 
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 CHAT_ID = os.environ.get("CHAT_ID")
 
-# ✅ HARDCODED SESSION TOKEN
-SESSION_TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6OTYxMDc3LCJmX25hbWUiOiIrMjUxOTUxNTAyNTAxIiwibF9uYW1lIjoiIiwiZV9tYWlsIjoiIiwiYWN0aXZlIjoxLCJhdmF0YXIiOm51bGwsInVzZXJuYW1lIjoiKzI1MTk1MTUwMjUwMSIsInRpbWV6b25lIjpudWxsLCJiYWxhbmNlIjoiMC4yMiIsInVuaXRzIjoiNS4wMCIsImJpcnRoZGF5IjoiMjAwMC0wOC0wNVQyMTowMDowMC4wMDBaIiwiZ2VuZGVyIjoiTkEiLCJwaG9uZSI6IisyNTE5NTE1MDI1MDEiLCJhZGRyZXNzIjpudWxsLCJjaXR5IjpudWxsLCJjb3VudHJ5IjoiRVRISU9QSUEiLCJjdXJyZW5jeSI6IkVUQiIsImNyZWF0ZWQiOiIyMDIzLTEyLTA1VDE2OjMyOjA1LjAwMFoiLCJraW5kIjoiSU5URVJORVQiLCJiZXR0aW5nX2FsbG93ZWQiOjEsImxvY2FsZSI6ImVuIiwibW9uaXRvcmVkIjowLCJiZXRsaW1pdCI6Ii0xIiwibGl2ZV9kZWxheSI6MCwiZGVsZXRlZCI6MCwiZGVsZXRlZF9hdCI6bnVsbCwiviI6MSwibm90aWZ5X2N0b2tlbiI6ImV5SmhiR2NpT2lKSVV6STFOaUlzSW5SNWNDSTZJa3BYVkNKOS5leUp6ZFdJaU9pSTVOakV3TnpjaUxDSnBZWFFpT2pFM05qUTFOekt5T0RTOS5UZlJyT2lsN0Fscm1aSXZZcUFpblhSX3RfQmNQbmVJZkJkN2RnQWFwQ2hjIiwiaWF0IjoxNzY0NTc5Mjg0LCJleHAiOjE3NjQ2NjU2ODR9.nwlc0-7RbhPbhAT0Ow7MVrC0lZo6w6Cjzh-rr54ThJI"
+# Updated Hardcoded Token
+SESSION_TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6OTYxMDc3LCJmX25hbWUiOiIrMjUxOTUxNTAyNTAxIiwibF9uYW1lIjoiIiwiZV9tYWlsIjoiIiwiYWN0aXZlIjoxLCJhdmF0YXIiOm51bGwsInVzZXJuYW1lIjoiKzI1MTk1MTUwMjUwMSIsInRpbWV6b25lIjpudWxsLCJiYWxhbmNlIjoiMC4yMiIsInVuaXRzIjoiNS4wMCIsImJpcnRoZGF5IjoiMjAwMC0wOC0wNVQyMTowMDowMC4wMDBaIiwiZ2VuZGVyIjoiTkEiLCJwaG9uZSI6IisyNTE5NTE1MDI1MDEiLCJhZGRyZXNzIjpudWxsLCJjaXR5IjpudWxsLCJjb3VudHJ5IjoiRVRISU9QSUEiLCJjdXJyZW5jeSI6IkVUQiIsImNyZWF0ZWQiOiIyMDIzLTEyLTA1VDE2OjMyOjA1LjAwMFoiLCJraW5kIjoiSU5URVJORVQiLCJiZXR0aW5nX2FsbG93ZWQiOjEsImxvY2FsZSI6ImVuIiwibW9uaXRvcmVkIjowLCJiZXRsaW1pdCI6Ii0xIiwibGl2ZV9kZWxheSI6MCwiZGVsZXRlZCI6MCwiZGVsZXRlZF9hdCI6bnVsbCwidiI6MSwibm90aWZ5X2N0b2tlbiI6ImV5SmhiR2NpT2lKSVV6STFOaUlzSW5SNWNDSTZJa3BYVkNKOS5leUp6ZFdJaU9pSTVOakV3TnpjaUxDSnBZWFFpT2pFM05qUTFPVGt6TVRCOS42enA2dUliTzBlSHZ0MF9KVmFUUkRBN0tsMmU1ci1CYTJES19tQURGdERNIiwiaWF0IjoxNzY0NTk5MzEwLCJleHAiOjE3NjQ2ODU3MTB9.FiaCkCFCA84XDVlkEbe9U39mrN8uI9w-YDl5VvBqywU"
 
 GAME_URL = "https://flashsport.bet/en/casino?game=%2Fkeno1675&returnUrl=casino"
 BASE_URL = "https://flashsport.bet"
 
+# --- BOT STATE ---
 bot_state = {
     "driver": None,
     "flashes_detected": 0,
     "session_start": None,
     "in_results_phase": False,
     "daily_flashes": 0,
-    "last_daily_report": time.time()
+    "last_daily_report": time.time(),
+    "start_timestamp": time.time()
 }
 
 def eth_time():
     return datetime.now(ETHIOPIA_TZ).strftime("%H:%M:%S")
-
-def eth_date():
-    return datetime.now(ETHIOPIA_TZ).strftime("%Y-%m-%d")
 
 def log_msg(msg):
     ts = eth_time()
     print(f"[{ts}] {msg}", flush=True)
 
 def send_to_telegram(image_path, caption):
+    if not TELEGRAM_TOKEN or not CHAT_ID:
+        log_msg("⚠️ Telegram credentials missing")
+        return False
     try:
         with open(image_path, 'rb') as photo:
             url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendPhoto"
@@ -50,16 +53,18 @@ def send_to_telegram(image_path, caption):
             data = {'chat_id': CHAT_ID, 'caption': caption}
             response = requests.post(url, files=files, data=data, timeout=15)
             if response.status_code == 200:
-                log_msg(f"✅ Sent: {caption[:50]}")
+                log_msg(f"✅ Sent photo: {caption[:50]}")
                 return True
             else:
-                log_msg(f"❌ Telegram error: {response.status_code}")
+                log_msg(f"❌ Telegram photo error: {response.status_code}")
                 return False
     except Exception as e:
-        log_msg(f"❌ Telegram failed: {str(e)[:50]}")
+        log_msg(f"❌ Telegram photo failed: {str(e)[:50]}")
         return False
 
 def send_telegram_message(text):
+    if not TELEGRAM_TOKEN or not CHAT_ID:
+        return False
     try:
         url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
         data = {'chat_id': CHAT_ID, 'text': text}
@@ -75,28 +80,28 @@ def count_green_pixels(image_path):
         width, height = img.size
         
         green_count = 0
-        
+        # Scan every 3rd pixel to save CPU
         for x in range(0, width, 3):
             for y in range(0, height, 3):
                 r, g, b = pixels[x, y]
-                
+                # Detection logic for bright green flash
                 if g > 200 and r < 100 and b < 100:
                     green_count += 1
-        
         return green_count
-        
     except Exception as e:
         log_msg(f"❌ Count error: {str(e)[:50]}")
         return 0
 
 def detect_green_flash(image_path):
     green_count = count_green_pixels(image_path)
+    # Range for flash (not result screen)
     if 50 < green_count < 300:
         return True
     return False
 
 def is_results_phase(image_path):
     green_count = count_green_pixels(image_path)
+    # If lots of green, it's the result screen showing all 20 numbers
     return green_count > 300
 
 def setup_chrome():
@@ -105,17 +110,16 @@ def setup_chrome():
     chrome_bin = None
     chromedriver_bin = None
     
+    # Auto-detect binaries
     try:
         result = subprocess.run(['which', 'chromium'], capture_output=True, text=True, timeout=3)
         chrome_bin = result.stdout.strip() if result.stdout else None
-    except:
-        pass
+    except: pass
     
     try:
         result = subprocess.run(['which', 'chromedriver'], capture_output=True, text=True, timeout=3)
         chromedriver_bin = result.stdout.strip() if result.stdout else None
-    except:
-        pass
+    except: pass
     
     options = Options()
     options.add_argument("--headless=new")
@@ -125,7 +129,6 @@ def setup_chrome():
     options.add_argument("--window-size=1920,1080")
     options.add_argument("--disable-blink-features=AutomationControlled")
     options.add_argument("--disable-extensions")
-    options.add_argument("--disable-plugins")
     
     if chrome_bin:
         options.binary_location = chrome_bin
@@ -135,8 +138,8 @@ def setup_chrome():
         driver = webdriver.Chrome(service=service, options=options) if service else webdriver.Chrome(options=options)
         
         stealth(driver, languages=["en-US"], vendor="Google Inc.", platform="Win32")
-        driver.set_page_load_timeout(30)
-        driver.set_script_timeout(30)
+        driver.set_page_load_timeout(45)
+        driver.set_script_timeout(45)
         
         log_msg("✅ Chrome ready")
         return driver
@@ -145,6 +148,7 @@ def setup_chrome():
         raise
 
 def get_latest_update_id():
+    if not TELEGRAM_TOKEN: return 0
     try:
         url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getUpdates"
         response = requests.get(url, timeout=10)
@@ -157,7 +161,6 @@ def get_latest_update_id():
 
 def handle_telegram_commands():
     log_msg("📱 Telegram command listener started")
-    
     update_id = get_latest_update_id()
     
     while True:
@@ -170,91 +173,56 @@ def handle_telegram_commands():
             if data.get('ok') and data.get('result'):
                 for update in data['result']:
                     update_id = update['update_id']
-                    
-                    if 'message' not in update:
-                        continue
+                    if 'message' not in update: continue
                     
                     message = update['message']
                     text = message.get('text', '').strip()
                     
                     if text == '/screenshot':
-                        log_msg("📸 /screenshot command received")
-                        
                         if bot_state["driver"]:
                             try:
-                                img_path = f"/tmp/keno_screenshot_{int(time.time())}.png"
+                                img_path = f"/tmp/manual_{int(time.time())}.png"
                                 bot_state["driver"].save_screenshot(img_path)
-                                caption = f"📸 Screenshot requested | Time: {eth_time()}"
-                                send_to_telegram(img_path, caption)
-                            except Exception as e:
-                                send_telegram_message(f"❌ Screenshot error: {str(e)[:50]}")
+                                send_to_telegram(img_path, f"📸 Requested Snapshot | {eth_time()}")
+                            except: send_telegram_message("❌ Cannot take screenshot now")
                         else:
-                            send_telegram_message("⚠️ Bot not connected to game yet")
+                            send_telegram_message("⚠️ Bot initializing...")
                     
                     elif text == '/status':
-                        log_msg("📊 /status command received")
-                        
-                        if bot_state["session_start"]:
-                            elapsed = (time.time() - bot_state["session_start"]) / 60
-                            status_text = f"✅ BOT STATUS\n📍 Running: {int(elapsed)}min\n🟢 Today flashes: {bot_state['daily_flashes']}\n⏱️ Time: {eth_time()}"
-                        else:
-                            status_text = "⚠️ Bot starting..."
-                        
-                        send_telegram_message(status_text)
-                    
-                    elif text == '/help':
-                        log_msg("ℹ️ /help command received")
-                        help_text = """🎯 KENO BOT COMMANDS:
-/screenshot - Get current game screenshot
-/status - Show bot status & today flashes
-/help - Show this message"""
-                        send_telegram_message(help_text)
+                        uptime_mins = (time.time() - bot_state["start_timestamp"]) / 60
+                        msg = (f"📊 KENO BOT STATUS\n"
+                               f"🕒 Time: {eth_time()}\n"
+                               f"⏱️ Uptime: {int(uptime_mins // 60)}h {int(uptime_mins % 60)}m\n"
+                               f"⚡ Flashes (Session): {bot_state['flashes_detected']}\n"
+                               f"📅 Flashes (Today): {bot_state['daily_flashes']}")
+                        send_telegram_message(msg)
             
             time.sleep(1)
-            
-        except Exception as e:
-            log_msg(f"⚠️ Command listener error: {str(e)[:50]}")
+        except:
             time.sleep(5)
 
 class HealthCheckHandler(BaseHTTPRequestHandler):
-    """Simple HTTP handler for health checks"""
-    
     def do_GET(self):
         if self.path == '/' or self.path == '/health':
             self.send_response(200)
             self.send_header('Content-type', 'text/plain')
             self.end_headers()
-            elapsed_time = (time.time() - bot_state["session_start"]) / 60 if bot_state["session_start"] else 0
-            health_msg = f'KENO BOT v6 RUNNING - Status: Active | Flashes: {bot_state["daily_flashes"]} | Uptime: {int(elapsed_time)}min\n'
-            self.wfile.write(health_msg.encode())
+            self.wfile.write(b"KENO BOT v6 LIVE")
         else:
             self.send_response(404)
             self.end_headers()
-    
-    def log_message(self, format, *args):
-        pass
+    def log_message(self, format, *args): pass
 
 def start_web_server():
-    """Start simple web server on port 10000 for Render health checks"""
     log_msg("🌐 Starting web server on port 10000...")
     try:
         server = HTTPServer(('0.0.0.0', 10000), HealthCheckHandler)
-        server_thread = threading.Thread(target=server.serve_forever, daemon=True)
-        server_thread.daemon = True
-        server_thread.start()
-        log_msg("✅ Web server running on port 10000 - Uptime Robot check /health")
+        threading.Thread(target=server.serve_forever, daemon=True).start()
     except Exception as e:
-        log_msg(f"⚠️ Web server error: {str(e)[:50]}")
+        log_msg(f"⚠️ Web server error: {e}")
 
 def monitor_game():
-    """Main game monitoring loop"""
-    log_msg("=" * 70)
-    log_msg("🟢 KENO BOT v6 - GREEN FLASH + AUTO-RELOAD + DAILY REPORTS")
-    log_msg("=" * 70)
-    log_msg("🔴 Commands: /screenshot, /status, /help")
-    log_msg("📋 SESSION_TOKEN: Hardcoded (line 20)")
-    log_msg("❤️  24/7 heartbeat logging every 10 seconds")
-    log_msg("📊 24-hour daily flash reports to Telegram")
+    log_msg("🟢 KENO BOT v6 STARTED")
     
     session_retry = 0
     
@@ -262,129 +230,118 @@ def monitor_game():
         driver = None
         try:
             session_retry += 1
-            log_msg(f"📍 Session #{session_retry}")
+            log_msg(f"📍 Starting Session #{session_retry}")
             
             driver = setup_chrome()
             bot_state["driver"] = driver
             
-            log_msg("🔐 Logging in...")
+            # 1. Login Logic
+            log_msg("🔐 Injecting Session Token...")
             driver.get(BASE_URL)
-            time.sleep(1)
+            time.sleep(2)
+            
             driver.add_cookie({
                 "name": "token",
                 "value": SESSION_TOKEN,
                 "domain": "flashsport.bet",
                 "path": "/"
             })
-            log_msg("✅ Session ready")
             
-            log_msg("🎮 Loading game...")
+            driver.get(BASE_URL) # Refresh to apply cookie
+            time.sleep(3)
+            
+            # 2. Check Token Validity
+            current_url = driver.current_url
+            if "auth" in current_url or "login" in current_url or "Sign" in driver.title:
+                log_msg("❌ TOKEN EXPIRED OR INVALID - Cannot Login!")
+                send_telegram_message("🚨 CRITICAL: Keno Session Token Expired! Bot cannot login. Please update token.")
+                # Sleep long to avoid spamming if token is dead
+                time.sleep(300) 
+                driver.quit()
+                continue
+            
+            log_msg("✅ Login Successful")
             driver.get(GAME_URL)
             time.sleep(5)
             
-            log_msg("⏱️  COUNTDOWN PHASE - Monitoring for green flashes")
-            
+            # Reset session counters
             bot_state["session_start"] = time.time()
             bot_state["flashes_detected"] = 0
-            bot_state["daily_flashes"] = 0
-            status_sent = False
             in_results_phase = False
-            last_status_log = time.time()
-            last_heartbeat_log = time.time()
-            last_daily_report = time.time()
-            scan_count = 0
+            last_heartbeat = time.time()
             
-            while (time.time() - bot_state["session_start"]) < 10800:
+            # --- MONITORING LOOP ---
+            while (time.time() - bot_state["session_start"]) < 14400: # Restart browser every 4 hours
                 try:
-                    img_path = f"/tmp/keno_scan_{int(time.time() * 100)}.png"
+                    # A. Daily Report Check
+                    if time.time() - bot_state["last_daily_report"] > 86400: # 24 Hours
+                        report_msg = (f"📅 DAILY FLASH REPORT\n"
+                                      f"----------------------\n"
+                                      f"Total Flashes: {bot_state['daily_flashes']}\n"
+                                      f"Time: {eth_time()}")
+                        send_telegram_message(report_msg)
+                        bot_state["daily_flashes"] = 0
+                        bot_state["last_daily_report"] = time.time()
+
+                    # B. Get Screenshot
+                    img_path = f"/tmp/scan_{int(time.time()*100)}.png"
+                    driver.save_screenshot(img_path)
                     
-                    try:
-                        driver.save_screenshot(img_path)
-                        
-                        # ✅ AUTO-RELOAD WHEN GAME SESSION EXPIRES
-                        page_source = driver.page_source
-                        if "YOUR GAME SESSION EXPIRED" in page_source or "RELOAD THE GAME" in page_source:
-                            log_msg("⚠️  Game session expired - Auto-reloading game...")
-                            driver.get(GAME_URL)
-                            time.sleep(5)
-                            continue
-                            
-                    except Exception as e:
-                        log_msg(f"⚠️  Screenshot timeout: {str(e)[:30]}")
-                        time.sleep(1)
-                        continue
-                    
-                    scan_count += 1
+                    # C. Check for Game Session Expiry (Text on screen)
+                    page_source = driver.page_source
+                    if "YOUR GAME SESSION EXPIRED" in page_source:
+                        log_msg("⚠️ GAME SESSION EXPIRED detected on screen. Reloading...")
+                        break # Breaks inner loop, triggers browser restart
+
+                    # D. Flash Detection
                     is_results = is_results_phase(img_path)
                     
                     if is_results:
                         if not in_results_phase:
-                            log_msg("⏸️  RESULTS PHASE (Top 20 - No alerts)")
+                            log_msg("⏸️ Results Phase")
                             in_results_phase = True
                     else:
                         if in_results_phase:
-                            log_msg("⏱️  COUNTDOWN PHASE RESUMED")
+                            log_msg("▶️ Countdown Phase Resumed")
                             in_results_phase = False
                         
                         if detect_green_flash(img_path):
                             bot_state["flashes_detected"] += 1
                             bot_state["daily_flashes"] += 1
                             
-                            alert_caption = f"🟢 GREEN FLASH #{bot_state['daily_flashes']} | Time: {eth_time()}"
-                            if send_to_telegram(img_path, alert_caption):
-                                log_msg(f"🚨 GREEN FLASH #{bot_state['daily_flashes']} DETECTED & SENT!")
+                            caption = f"🟢 FLASH DETECTED | {eth_time()}"
+                            if send_to_telegram(img_path, caption):
+                                log_msg(f"🚨 FLASH SENT! (Session: {bot_state['flashes_detected']})")
                             
-                            time.sleep(0.5)
+                            time.sleep(0.5) # Avoid double alerts
                     
-                    elapsed = time.time() - bot_state["session_start"]
-                    
-                    # ✅ 24/7 HEARTBEAT LOGGING EVERY 10 SECONDS
-                    if time.time() - last_heartbeat_log > 10:
-                        log_msg(f"❤️  HEARTBEAT | Bot running 24/7 | {eth_time()}")
-                        last_heartbeat_log = time.time()
-                    
-                    # Status log every 30 seconds
-                    if time.time() - last_status_log > 30:
-                        log_msg(f"✅ MONITORING ACTIVE | Scans: {scan_count} | Today: {bot_state['daily_flashes']} flashes | Time: {eth_time()}")
-                        last_status_log = time.time()
-                    
-                    # ✅ DAILY FLASH REPORT EVERY 24 HOURS
-                    if time.time() - last_daily_report > 86400:
-                        report_msg = f"📊 24-HOUR FLASH REPORT\n📅 Date: {eth_date()}\n🟢 Total Flashes: {bot_state['daily_flashes']}\n⏱️ Time: {eth_time()}"
-                        if send_telegram_message(report_msg):
-                            log_msg(f"📊 24-hour report sent: {bot_state['daily_flashes']} flashes")
-                        bot_state["daily_flashes"] = 0
-                        last_daily_report = time.time()
-                    
+                    # E. Heartbeat Logging (Every 60 sec)
+                    if time.time() - last_heartbeat > 60:
+                        log_msg(f"💓 Heartbeat: Active | Daily: {bot_state['daily_flashes']} | Session: {bot_state['flashes_detected']}")
+                        last_heartbeat = time.time()
+                        
                     time.sleep(1)
                     
                 except Exception as e:
-                    log_msg(f"⚠️  Scan error: {str(e)[:50]}")
+                    log_msg(f"⚠️ Loop error: {str(e)[:50]}")
                     time.sleep(1)
             
-            log_msg(f"✅ Session #{session_retry} complete - {bot_state['flashes_detected']} total flashes")
+            log_msg("♻️ Scheduled Browser Restart")
             
         except Exception as e:
-            log_msg(f"❌ Session error: {str(e)[:50]}")
+            log_msg(f"❌ Critical Session Error: {str(e)[:50]}")
+            time.sleep(5)
         
         finally:
             if driver:
-                try:
-                    driver.quit()
-                except:
-                    pass
-            
+                try: driver.quit()
+                except: pass
             bot_state["driver"] = None
-            log_msg("⏳ Restarting in 10 seconds...")
-            time.sleep(10)
+            time.sleep(5)
 
 def main():
     start_web_server()
-    
-    command_thread = threading.Thread(target=handle_telegram_commands, daemon=True)
-    command_thread.start()
-    log_msg("✅ Telegram command listener started")
-    
+    threading.Thread(target=handle_telegram_commands, daemon=True).start()
     monitor_game()
 
 if __name__ == "__main__":
